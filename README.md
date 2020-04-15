@@ -56,7 +56,7 @@ Tensorboard allows tracking of deformation losses, as well as visualizing the so
 If you find our code useful for your work, please consider citing our paper:
 ```
 @inproceedings{
-jiang2018spherical,
+acoolpaper,
 title={THE PAPER DOES NOT EXIST YET},
 author={Chiyu Max Jiang and Jingwei Huang and our wonderful collaborators},
 booktitle={Maybe Neural Information Processing Systems 2020},
