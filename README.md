@@ -1,4 +1,4 @@
-## DeepDeform
+# DeepDeform
 Learning a Deformation Space for Geometries.
  
 By: [Chiyu "Max" Jiang](http://maxjiang.ml/), [Jingwei Huang](http://stanford.edu/~jingweih/)
@@ -48,8 +48,8 @@ cd path/to/DeepDeform/runs/<job_name>/tensorboard
 tensorboard --logdir . --port 6006
 ```
 Tensorboard allows tracking of deformation losses, as well as visualizing the source / target / deformed meshes. The deformed meshes are colored by the distance per vertex with respect to target shape.
-![tb_loss](doc/tb_loss.png "tensorboard losses")
-![tb_loss](doc/tb_mesh.png "tensorboard meshes")
+![tb_loss](doc/tb_losses.png "tensorboard losses")
+![tb_loss](doc/tb_meshes.png "tensorboard meshes")
 
 
 ### Citation
