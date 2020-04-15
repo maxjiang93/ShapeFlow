@@ -12,8 +12,8 @@ mkdir -p runs
 srun python shapenet_train.py \
 --data_root=$data_root \
 --batch_size_per_gpu=16 \
---pseudo_eval_epoch_size=32 \
---pseudo_train_epoch_size=32 \
+--pseudo_eval_epoch_size=2048 \
+--pseudo_train_epoch_size=128 \
 --epochs=100 \
 --lr=1e-3 \
 --log_dir=$log_dir \
