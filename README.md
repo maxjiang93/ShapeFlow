@@ -25,7 +25,7 @@ bash download_data.sh
 ### Run experiments
 Please use our provided launch script to start training the shape deformation model.
 ```
-bash shapenet_launch.sh
+bash shapenet_train.sh
 ```
 
 The training will launch on all available GPUs. Mask GPUs accordingly if you want to use only a subset of all GPUs. The initial tests are done on NVIDIA Volta V100 GPUs, therefore the `batch_size_per_gpu=16` might need to be adjusted accordingly for GPUs with smaller or larger memory limits if the out of memory error is triggered.
