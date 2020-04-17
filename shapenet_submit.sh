@@ -1,4 +1,4 @@
-#!/bin/bash
+#/bin/bash
 #SBATCH -o .slurm_logs/run_0.out
 #SBATCH -C gpu
 #SBATCH -t 240
@@ -22,7 +22,7 @@ data_root=../../data/shapenet
 
 # run
 srun -l python train_shapenet.py \
---batch_size_per_gpu=16 \
+--batch_size_per_gpu=32 \
 --epochs=100 \
 --lr=1e-3 \
 --log_dir=$log_dir \

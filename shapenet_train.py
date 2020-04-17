@@ -39,6 +39,8 @@ OPTIMIZERS = {
     'rmsprop': optim.RMSprop,
 }
 
+SOLVERS = ['dopri5', 'adams', 'euler', 'midpoint', 'rk4', 'explicit_adams', 'fixed_adams']
+
 
 def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch, 
                   global_step, device, logger, writer, optimizer, vis_loader=None):
@@ -173,6 +175,12 @@ def get_args():
                         help="path to data folder root (default: data/shapenet_watertight)")
     parser.add_argument("--deformer_arch", type=str, choices=["imnet", "vanilla"], default="imnet",
                         help="deformer architecture. (default: imnet)")
+    parser.add_argument("--solver", type=str, choices=SOLVERS, default="dopri5",
+                        help="ode solver. (default: dopri5)")    
+    parser.add_argument("--atol", type=float, default=1e-5,
+                        help="absolute error tolerence in ode solver. (default: 1e-5)")    
+    parser.add_argument("--rtol", type=float, default=1e-5,
+                        help="relative error tolerence in ode solver. (default: 1e-5)")   
     parser.add_argument("--log_interval", type=int, default=10, metavar="N",
                         help="how many batches to wait before logging training status")
     parser.add_argument("--log_dir", type=str, required=True, help="log directory for run")
@@ -200,6 +208,11 @@ def get_args():
     parser.add_argument("--no_visualize_mesh", dest='vis_mesh', action='store_false',
                         help="no visualize deformation for meshes of sample validation data in tensorboard.")
     parser.set_defaults(vis_mesh=True)
+    parser.add_argument("--adjoint", dest='adjoint', action='store_true',
+                        help='use adjoint solver to propagate gradients thru odeint.')
+    parser.add_argument("--no_adjoint", dest='adjoint', action='store_false',
+                        help='not use adjoint solver to propagate gradients thru odeint.')
+    parser.set_defaults(adjoint=True)
     parser.add_argument("--clip_grad", default=1., type=float,
                         help="clip gradient to this value. large value basically deactivates it.")
 
@@ -256,7 +269,8 @@ def main():
     in_feat = 6 if args.normals else 3
     encoder = PointNetEncoder(nf=16, in_features=in_feat, out_features=args.lat_dims).to(device)
     deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=3, 
-                                  s_width=16, method='rk4', nonlinearity='leakyrelu', arch='imnet')
+                                  s_width=16, method=args.solver, nonlinearity='leakyrelu', arch='imnet',
+                                  adjoint=args.adjoint, rtol=args.rtol, atol=args.atol)
     all_model_params = list(deformer.parameters())+list(encoder.parameters())
 
     optimizer = OPTIMIZERS[args.optim](all_model_params, lr=args.lr)

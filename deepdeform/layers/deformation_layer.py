@@ -1,8 +1,7 @@
 import torch
 from torch import nn
-# from torchdiffeq import odeint
-# from torchdiffeq import odeint_adjoint as odeint
-from torchdiffeq import odeint
+from torchdiffeq import odeint_adjoint
+from torchdiffeq import odeint as odeint_regular
 
 import numpy as np
 
@@ -320,8 +319,8 @@ class NeuralFlowModel(nn.Module):
     
 class NeuralFlowDeformer(nn.Module):
     def __init__(self, dim=3, latent_size=1, f_nlayers=4, f_width=50, 
-                 s_nlayers=3, s_width=20, method='rk4', nonlinearity='leakyrelu', 
-                 arch='imnet', conformal=False):
+                 s_nlayers=3, s_width=20, method='dopri5', nonlinearity='leakyrelu', 
+                 arch='imnet', conformal=False, adjoint=True, atol=1e-5, rtol=1e-5):
         """Initialize. The parameters are the parameters for the Deformation Flow network.
         Args:
           dim: int, physical dimensions. Either 2 for 2d or 3 for 3d.
@@ -331,12 +330,18 @@ class NeuralFlowDeformer(nn.Module):
           s_nlayers: int, number of neural network layers for sign network. >= 2.
           s_width: int, number of neurons per hidden layer for sign network. >= 1.
           arch: str, architecture, choice of 'imnet' / 'vanilla'
+          adjoint: bool, whether to use adjoint solver to backprop gadient thru odeint.
+          rtol, atol: float, relative / absolute error tolerence in ode solver.
         """
         super(NeuralFlowDeformer, self).__init__()
         self.method = method
         self.conformal = conformal
         self.arch = arch
+        self.adjoint = adjoint
+        self.odeint = odeint_adjoint if adjoint else odeint_regular
         self.timing = torch.from_numpy(np.array([0, 1]).astype('float32'))
+        self.rtol = rtol
+        self.atol = atol
 
         self.net = NeuralFlowModel(dim=dim, latent_size=latent_size, 
                                    f_nlayers=f_nlayers, f_width=f_width,
@@ -356,5 +361,6 @@ class NeuralFlowDeformer(nn.Module):
           points_transformed: [batch, num_points, dim]
         """
         self.net.update_latents(latent_source, latent_target)
-        points_transformed = odeint(self.net, points, self.timing, method=self.method)[1]
+        points_transformed = self.odeint(self.net, points, self.timing, 
+                                         method=self.method, rtol=self.rtol, atol=self.atol)[1]
         return points_transformed
