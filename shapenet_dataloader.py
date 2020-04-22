@@ -80,6 +80,14 @@ class ShapeNetBase(Dataset):
         j = idx - (i * (i-1)) / 2
         return int(i), int(j)-1
     
+    def restrict_subset(self, indices):
+        """Restrict data to the subset of data as indicated by the indices.
+        
+        Args:
+          indices: list or array of ints, to index the original self.files 
+        """
+        self.files = [self.files[i] for i in indices]
+    
 
 class ShapeNetVertexSampler(ShapeNetBase):
     """Pytorch Dataset for sampling vertices from meshes."""
@@ -197,15 +205,21 @@ class ShapeNetMeshLoader(ShapeNetBase):
         
 if __name__ == "__main__":
     # simple test
-    dataset = ShapeNetVertexSampler(data_root="/home/maxjiang/codes/ShapeDeform/data/shapenet",
+    dataset = ShapeNetVertexSampler(data_root="data/shapenet_watertight",
                                     split='val', nsamples=5000, normals=True, category="chair")
     print(f"Number of unique combinations of shapes: {len(dataset)}")
     print(f"Number of unique shapes: {dataset.n_shapes}")
     v0, v1 = dataset[185]
     print(v0.shape)
     print(v1.shape)
+    print(f"# shapes: {len(dataset)}, # combinations: {dataset.n_shapes}")
     
-    meshset = ShapeNetMeshLoader(data_root="/home/maxjiang/codes/ShapeDeform/data/shapenet",
+    dataset.restrict_subset([0, 6, 7])
+    print(f"# shapes: {len(dataset)}, # combinations: {dataset.n_shapes}")
+    print(dataset.files)
+    
+    
+    meshset = ShapeNetMeshLoader(data_root="data/shapenet_simplified",
                                  split='val', normals=True, category="chair")
     v0, f0, v1, f1 = meshset[185]
     print(v0.shape)

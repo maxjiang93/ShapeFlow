@@ -39,7 +39,8 @@ OPTIMIZERS = {
     'rmsprop': optim.RMSprop,
 }
 
-SOLVERS = ['dopri5', 'adams', 'euler', 'midpoint', 'rk4', 'explicit_adams', 'fixed_adams']
+SOLVERS = ['dopri5', 'adams', 'euler', 'midpoint', 'rk4', 'explicit_adams', 'fixed_adams', 
+           'bosh3', 'adaptive_heun', 'tsit5']
 
 
 def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch, 
@@ -49,10 +50,8 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
     if not mode in modes:
         raise ValueError(f"mode ({mode}) must be one of {modes}.")
     if mode == 'train':
-        encoder.train()
         deformer.train()
     else:
-        encoder.eval()
         deformer.eval()
     tot_loss = 0
     count = 0
@@ -69,25 +68,28 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
             bs = len(source_pts)
             optimizer.zero_grad()
 
-            source_latents = encoder(source_pts)
-            target_latents = encoder(target_pts)
-
-            src_to_tar = deformer(source_pts[..., :3], source_latents, target_latents)
-            tar_to_src = deformer(target_pts[..., :3], target_latents, source_latents)
+            # batch together source and target to create two-way loss training
+            # cannot call deformer twice (once for each way) because that
+            # breaks odeint_ajoint's gradient computation. not sure why.
+            source_target_points = torch.cat([source_pts, target_pts], dim=0)
+            target_source_points = torch.cat([target_pts, source_pts], dim=0)
+            
+            source_target_latents = encoder(source_target_points)
+            target_source_latents = torch.cat([source_target_latents[bs:],
+                                               source_target_latents[:bs]], dim=0)
+            
+            src_to_tar = deformer(source_target_points[..., :3], 
+                                  source_target_latents, target_source_latents)
 
             # symmetric pair of matching losses
-            _, _, src_to_tar_dist = chamfer_dist(src_to_tar, target_pts[..., :3])
-            _, _, tar_to_src_dist = chamfer_dist(tar_to_src, source_pts[..., :3])
+            _, _, dist = chamfer_dist(src_to_tar, target_source_points[..., :3])
 
-            loss_src_to_tar = criterion(src_to_tar_dist, torch.zeros_like(src_to_tar_dist))
-            loss_tar_to_src = criterion(tar_to_src_dist, torch.zeros_like(tar_to_src_dist))
+            loss = criterion(dist, torch.zeros_like(dist))
 
-            loss = loss_src_to_tar + loss_tar_to_src
             if mode == 'train': 
                 loss.backward()
                 
                 # gradient clipping
-                torch.nn.utils.clip_grad_value_(encoder.module.parameters(), args.clip_grad)
                 torch.nn.utils.clip_grad_value_(deformer.module.parameters(), args.clip_grad)
                 
                 optimizer.step()
@@ -98,16 +100,12 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
                 # logger log
                 logger.info(
                     "{} Epoch: {} [{}/{} ({:.0f}%)]\tLoss Sum: {:.6f}\t"
-                    "Loss s2t: {:.6f}\tLoss t2s: {:.6f}\t"
                     "DataTime: {:.4f}\tComputeTime: {:.4f}".format(
                         mode, epoch, batch_idx * bs, len(dataloader) * bs,
                         100. * batch_idx / len(dataloader), loss.item(),
-                        loss_src_to_tar.item(), loss_tar_to_src.item(),
                         tic - toc, time.time() - tic))
                 # tensorboard log
                 writer.add_scalar(f'{mode}/loss_sum', loss, global_step=int(global_step))
-                writer.add_scalar(f'{mode}/loss_s2t', loss_src_to_tar, global_step=int(global_step))
-                writer.add_scalar(f'{mode}/loss_t2s', loss_tar_to_src, global_step=int(global_step))
             
             if mode == 'train': global_step += 1
             toc = time.time()
@@ -215,6 +213,19 @@ def get_args():
     parser.set_defaults(adjoint=True)
     parser.add_argument("--clip_grad", default=1., type=float,
                         help="clip gradient to this value. large value basically deactivates it.")
+    parser.add_argument("--dropout_prob", default=0., type=float,
+                        help="dropout probability in pointnet encoder.")
+    parser.add_argument("--pn_batchnorm", dest='pn_batchnorm', action='store_true',
+                        help="use batchnorm within pointnet.")
+    parser.add_argument("--no_pn_batchnorm", dest='pn_batchnorm', action='store_false',
+                        help="not use batchnorm within pointnet.")
+    parser.set_defaults(pn_batchnorm=True)
+    parser.add_argument("--debug", dest='debug', action='store_true',
+                        help="debug mode on.")
+    parser.add_argument("--no_debug", dest='debug', action='store_false',
+                        help="debug mode off.")
+    parser.set_defaults(debug=True)
+    
 
     args = parser.parse_args()
     return args
@@ -249,6 +260,11 @@ def main():
                                      nsamples=5000, normals=args.normals)
     evalset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",
                                     nsamples=5000, normals=args.normals)
+    if args.debug:
+        trainset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair", 
+                                         nsamples=5000, normals=args.normals)
+        trainset.restrict_subset([0, 6, 7])
+        evalset.restrict_subset([0, 6, 7])
 
     train_sampler = RandomSampler(trainset, replacement=True, num_samples=args.pseudo_train_epoch_size)
     eval_sampler = RandomSampler(evalset, replacement=True, num_samples=args.pseudo_eval_epoch_size)
@@ -267,11 +283,20 @@ def main():
         
     # setup model
     in_feat = 6 if args.normals else 3
-    encoder = PointNetEncoder(nf=16, in_features=in_feat, out_features=args.lat_dims).to(device)
+    norm_type = 'batchnorm' if args.pn_batchnorm else 'none'
+    encoder = PointNetEncoder(nf=32, in_features=in_feat, out_features=args.lat_dims, 
+                              norm_type=norm_type, dropout_prob=args.dropout_prob)
     deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=3, 
                                   s_width=16, method=args.solver, nonlinearity='leakyrelu', arch='imnet',
                                   adjoint=args.adjoint, rtol=args.rtol, atol=args.atol)
-    all_model_params = list(deformer.parameters())+list(encoder.parameters())
+    
+    # this is an awkward workaround to get gradients for encoder via adjoint solver
+    deformer.add_encoder(encoder)
+    deformer.to(device)
+    encoder = deformer.net.encoder
+
+    # by wrapping encoder into deformer, no need to add encoder parameters individually
+    all_model_params = deformer.parameters()
 
     optimizer = OPTIMIZERS[args.optim](all_model_params, lr=args.lr)
     start_ep = 0
@@ -329,7 +354,7 @@ def main():
             "optim_state_dict": optimizer.state_dict(),
             "tracked_stats": tracked_stats,
             "global_step": global_step,
-        }, is_best, epoch, checkpoint_path, "_meshflow", logger)
+        }, is_best, epoch, checkpoint_path, "_deepdeform", logger)
 
 if __name__ == "__main__":
     main()

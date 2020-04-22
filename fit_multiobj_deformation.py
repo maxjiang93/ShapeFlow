@@ -15,7 +15,7 @@ import trimesh
 from glob import glob
 
 
-files = sorted(glob("/home/maxjiang/codes/DeepDeform/data/shapenet_watertight/val/03001627/*/*.ply"))
+files = sorted(glob("data/shapenet_watertight/val/03001627/*/*.ply"))
 m1 = trimesh.load(files[1])
 m2 = trimesh.load(files[6])
 m3 = trimesh.load(files[7])
@@ -27,10 +27,10 @@ criterion = torch.nn.MSELoss()
 latent_size = 3
 
 deformer = NeuralFlowDeformer(latent_size=latent_size, f_nlayers=6, f_width=100, s_nlayers=2, s_width=5, nonlinearity='leakyrelu', arch='imnet',
-                              method='rk4', atol=1e-5, rtol=1e-5, adjoint=True).to(device)
+                              method='rk4', atol=1e-5, rtol=1e-5, adjoint=False).to(device)
 encoder = PointNetEncoder(nf=16, out_features=latent_size).to(device)
 
-optimizer = optim.Adam(list(deformer.parameters())+list(encoder.parameters()), lr=1e-3)
+optimizer = optim.RMSprop(list(deformer.parameters())+list(encoder.parameters()), lr=1e-3)
 
 niter = 1000
 npts = 5000
@@ -58,7 +58,7 @@ for it in range(0, niter):
     
     batch_latent_src = encoder(V_src)
     batch_latent_tar = encoder(V_tar)
-    
+#     print(V_src.shape, batch_latent_src.shape, batch_latent_tar.shape)
     V_deform = deformer(V_src, batch_latent_src, batch_latent_tar)
     
 
@@ -88,13 +88,15 @@ with torch.no_grad():
     V3_1 = deformer(V3.unsqueeze(0), V3_latent, V1_latent).detach().cpu().numpy()[0]
     V2_3 = deformer(V2.unsqueeze(0), V2_latent, V3_latent).detach().cpu().numpy()[0]
     V3_2 = deformer(V3.unsqueeze(0), V3_latent, V2_latent).detach().cpu().numpy()[0]
-trimesh.Trimesh(V1_2, m1.faces).export('/home/maxjiang/codes/ShapeDeform/data/output_1_2.obj')
-trimesh.Trimesh(V2_1, m2.faces).export('/home/maxjiang/codes/ShapeDeform/data/output_2_1.obj')
-trimesh.Trimesh(V1_3, m1.faces).export('/home/maxjiang/codes/ShapeDeform/data/output_1_3.obj')
-trimesh.Trimesh(V3_1, m3.faces).export('/home/maxjiang/codes/ShapeDeform/data/output_3_1.obj')
-trimesh.Trimesh(V2_3, m2.faces).export('/home/maxjiang/codes/ShapeDeform/data/output_2_3.obj')
-trimesh.Trimesh(V3_2, m3.faces).export('/home/maxjiang/codes/ShapeDeform/data/output_3_2.obj')
 
-m1.export('/home/maxjiang/codes/ShapeDeform/data/output_1.obj')
-m2.export('/home/maxjiang/codes/ShapeDeform/data/output_2.obj')
-m3.export('/home/maxjiang/codes/ShapeDeform/data/output_3.obj')
+os.makedirs('demo', exist_ok=True)
+trimesh.Trimesh(V1_2, m1.faces).export('demo/output_1_2.obj')
+trimesh.Trimesh(V2_1, m2.faces).export('demo/output_2_1.obj')
+trimesh.Trimesh(V1_3, m1.faces).export('demo/output_1_3.obj')
+trimesh.Trimesh(V3_1, m3.faces).export('demo/output_3_1.obj')
+trimesh.Trimesh(V2_3, m2.faces).export('demo/output_2_3.obj')
+trimesh.Trimesh(V3_2, m3.faces).export('demo/output_3_2.obj')
+
+m1.export('demo/output_1.obj')
+m2.export('demo/output_2.obj')
+m3.export('demo/output_3.obj')
