@@ -78,11 +78,11 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
             target_source_latents = torch.cat([source_target_latents[bs:],
                                                source_target_latents[:bs]], dim=0)
             
-            src_to_tar = deformer(source_target_points[..., :3], 
-                                  source_target_latents, target_source_latents)
+            deformed_pts = deformer(source_target_points[..., :3], 
+                                    source_target_latents, target_source_latents)
 
             # symmetric pair of matching losses
-            _, _, dist = chamfer_dist(src_to_tar, target_source_points[..., :3])
+            _, _, dist = chamfer_dist(deformed_pts, target_source_points[..., :3])
 
             loss = criterion(dist, torch.zeros_like(dist))
 
@@ -182,16 +182,17 @@ def get_args():
     parser.add_argument("--log_interval", type=int, default=10, metavar="N",
                         help="how many batches to wait before logging training status")
     parser.add_argument("--log_dir", type=str, required=True, help="log directory for run")
+    parser.add_argument("--nonlin", type=str, default='elu', help="type of nonlinearity to use")
     parser.add_argument("--optim", type=str, default="adam", choices=list(OPTIMIZERS.keys()))
     parser.add_argument("--loss_type", type=str, default="l2", choices=list(LOSSES.keys()))
     parser.add_argument("--resume", type=str, default=None,
                         help="path to checkpoint if resume is needed")
     parser.add_argument("-n", "--nsamples", default=2048, type=int,
                         help="number of sample points to draw per shape.")
-    parser.add_argument("--lat_dims", default=64, type=int, help="number of latent dimensions.")
+    parser.add_argument("--lat_dims", default=32, type=int, help="number of latent dimensions.")
     parser.add_argument("--encoder_nf", default=32, type=int,
                         help="number of base number of feature layers in encoder (pointnet).")
-    parser.add_argument("--deformer_nf", default=64, type=int,
+    parser.add_argument("--deformer_nf", default=100, type=int,
                         help="number of base number of feature layers in deformer (imnet).")
     parser.add_argument("--lr_scheduler", dest='lr_scheduler', action='store_true')
     parser.add_argument("--no_lr_scheduler", dest='lr_scheduler', action='store_false')
@@ -263,11 +264,19 @@ def main():
     if args.debug:
         trainset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair", 
                                          nsamples=5000, normals=args.normals)
-        trainset.restrict_subset([0, 6, 7])
-        evalset.restrict_subset([0, 6, 7])
+        trainset.restrict_subset([1, 6, 7])
+        evalset.restrict_subset([1, 6, 7])
 
-    train_sampler = RandomSampler(trainset, replacement=True, num_samples=args.pseudo_train_epoch_size)
-    eval_sampler = RandomSampler(evalset, replacement=True, num_samples=args.pseudo_eval_epoch_size)
+#     train_sampler = RandomSampler(trainset, replacement=True, num_samples=args.pseudo_train_epoch_size)
+#     eval_sampler = RandomSampler(evalset, replacement=True, num_samples=args.pseudo_eval_epoch_size)
+
+#     train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=False, drop_last=True,
+#                               sampler=train_sampler, **kwargs)
+#     eval_loader = DataLoader(evalset, batch_size=args.batch_size, shuffle=False, drop_last=False,
+#                              sampler=eval_sampler, **kwargs)
+
+    train_sampler = RandomSampler(trainset, replacement=False)
+    eval_sampler = RandomSampler(evalset, replacement=False)
 
     train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=False, drop_last=True,
                               sampler=train_sampler, **kwargs)
@@ -284,10 +293,10 @@ def main():
     # setup model
     in_feat = 6 if args.normals else 3
     norm_type = 'batchnorm' if args.pn_batchnorm else 'none'
-    encoder = PointNetEncoder(nf=32, in_features=in_feat, out_features=args.lat_dims, 
+    encoder = PointNetEncoder(nf=args.encoder_nf, in_features=in_feat, out_features=args.lat_dims, 
                               norm_type=norm_type, dropout_prob=args.dropout_prob)
-    deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=3, 
-                                  s_width=16, method=args.solver, nonlinearity='leakyrelu', arch='imnet',
+    deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=2, 
+                                  s_width=5, method=args.solver, nonlinearity=args.nonlin, arch='imnet',
                                   adjoint=args.adjoint, rtol=args.rtol, atol=args.atol)
     
     # this is an awkward workaround to get gradients for encoder via adjoint solver
@@ -319,10 +328,11 @@ def main():
     # more threads don't seem to help
     chamfer_dist = ChamferDistKDTree(reduction='mean', njobs=1)
     chamfer_dist.to(device)
-    encoder = nn.DataParallel(encoder)
-    encoder.to(device)
+#     encoder = nn.DataParallel(encoder)
+#     encoder.to(device)
     deformer = nn.DataParallel(deformer)
     deformer.to(device)
+    encoder = deformer.net.encoder
 
     model_param_count = lambda model: sum(x.numel() for x in model.parameters())
     logger.info(("{}(encoder) + {}(deformer) paramerters in total"

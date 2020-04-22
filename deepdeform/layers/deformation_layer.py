@@ -238,7 +238,7 @@ class ConformalDeformationFlowNetwork(nn.Module):
 
     
 class DeformationSignNetwork(nn.Module):
-    def __init__(self, latent_size=1, nlayers=3, width=20, nonlinearity='tanh10x'):
+    def __init__(self, latent_size=1, nlayers=3, width=20, nonlinearity='tanh'):
         """Initialize deformation sign network.
         Args:
           latent_size: int, size of latent space. >= 1.

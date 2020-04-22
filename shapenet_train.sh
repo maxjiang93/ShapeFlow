@@ -9,25 +9,25 @@ mkdir -p runs
 
 # export CUDA_VISIBLE_DEVICES=0
 
-srun python shapenet_train.py \
---solver='dopri5' \
+srun python -m pdb shapenet_train.py \
 --atol=1e-4 \
 --rtol=1e-4 \
 --data_root=$data_root \
 --pseudo_eval_epoch_size=128 \
---pseudo_train_epoch_size=2048 \
---epochs=100 \
 --lr=1e-3 \
 --log_dir=$log_dir \
---nsamples=2048 \
---lat_dims=64 \
 --encoder_nf=32 \
---deformer_nf=64 \
 --lr_scheduler \
 --no_normals \
 --visualize_mesh \
---no_pn_batchnorm \
---batch_size_per_gpu=1 \
+--pn_batchnorm \
+--batch_size_per_gpu=3 \
 --log_interval=1 \
 --debug \
---no_adjoint \
+--adjoint \
+--epochs=1 \
+--solver='dopri5' \
+--deformer_nf=100 \
+--pseudo_train_epoch_size=1000 \
+--nsamples=5000 \
+--lat_dims=32 \
