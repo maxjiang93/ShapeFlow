@@ -6,6 +6,7 @@ import numpy as np
 import trimesh
 import glob
 import warnings
+import imageio
 
 
 synset_to_cat = {
@@ -52,6 +53,8 @@ class ShapeNetBase(Dataset):
             if not c in cats:
                 raise ValueError(f"{c} is not in the list of the 13 categories: {cats}")
         self.files = self._get_filenames(self.data_root, self.split, self.categories)
+        self.thumbnails_dir = None
+        self.thumbnails = False
         
     @staticmethod
     def _get_filenames(data_root, split, categories):
@@ -79,6 +82,14 @@ class ShapeNetBase(Dataset):
         i = np.ceil((-1+np.sqrt(1+8*idx)) / 2)
         j = idx - (i * (i-1)) / 2
         return int(i), int(j)-1
+    
+    def restrict_subset(self, indices):
+        """Restrict data to the subset of data as indicated by the indices.
+        
+        Args:
+          indices: list or array of ints, to index the original self.files 
+        """
+        self.files = [self.files[i] for i in indices]
     
 
 class ShapeNetVertexSampler(ShapeNetBase):
@@ -126,6 +137,22 @@ class ShapeNetVertexSampler(ShapeNetBase):
             v_sample = np.concatenate([v_sample, n_sample], axis=-1)
         
         return v_sample
+    
+    def add_thumbnails(self, thumbnails_root):
+        self.thumbnails = True
+        self.thumbnails_dir = thumbnails_root
+    
+    def _get_one_mesh(self, idx):
+        verts = self.sample_mesh(self.files[idx], self.nsamples, self.normals)
+        verts = verts.astype(np.float32)
+        if self.thumbnails:
+            thumb_dir = self.files[idx].replace(self.data_root, self.thumbnails_dir)
+            thumb_dir = os.path.dirname(thumb_dir)
+            thumb_file = os.path.join(thumb_dir, "thumbnail.png")
+            thumb = np.array(imageio.imread(thumb_file))
+            return verts, thumb
+        else:
+            return verts
         
     def __getitem__(self, idx):
         """Get a random pair of shapes corresponding to idx.
@@ -134,15 +161,18 @@ class ShapeNetVertexSampler(ShapeNetBase):
         Returns:
           verts_i: [npoints, 3 or 6] float tensor for point samples from the first mesh.
           verts_j: [npoints, 3 or 6] float tensor for point samples from the second mesh.
+          thumb_i: (optional) [H, W, 3] int8 tensor for thumbnail image for the first mesh.
+          thumb_j: (optional) [H, W, 3] int8 tensor for thumbnail image for the second mesh.
         """
         i, j = self._idx_to_combinations(idx)
-        verts_i = self.sample_mesh(self.files[i], self.nsamples, self.normals)
-        verts_j = self.sample_mesh(self.files[j], self.nsamples, self.normals)
-        verts_i = verts_i.astype(np.float32)
-        verts_j = verts_j.astype(np.float32)
-        
-        return verts_i, verts_j
-        
+        if self.thumbnails:
+            verts_i, thumb_i = self._get_one_mesh(i)
+            verts_j, thumb_j = self._get_one_mesh(j)
+            return verts_i, verts_j, thumb_i, thumb_j
+        else:
+            verts_i = self._get_one_mesh(i)
+            verts_j = self._get_one_mesh(j)
+            return verts_i, verts_j
         
 class ShapeNetMeshLoader(ShapeNetBase):
     """Pytorch Dataset for sampling entire meshes."""
@@ -197,15 +227,21 @@ class ShapeNetMeshLoader(ShapeNetBase):
         
 if __name__ == "__main__":
     # simple test
-    dataset = ShapeNetVertexSampler(data_root="/home/maxjiang/codes/ShapeDeform/data/shapenet",
+    dataset = ShapeNetVertexSampler(data_root="data/shapenet_watertight",
                                     split='val', nsamples=5000, normals=True, category="chair")
     print(f"Number of unique combinations of shapes: {len(dataset)}")
     print(f"Number of unique shapes: {dataset.n_shapes}")
     v0, v1 = dataset[185]
     print(v0.shape)
     print(v1.shape)
+    print(f"# shapes: {len(dataset)}, # combinations: {dataset.n_shapes}")
     
-    meshset = ShapeNetMeshLoader(data_root="/home/maxjiang/codes/ShapeDeform/data/shapenet",
+    dataset.restrict_subset([0, 6, 7])
+    print(f"# shapes: {len(dataset)}, # combinations: {dataset.n_shapes}")
+    print(dataset.files)
+    
+    
+    meshset = ShapeNetMeshLoader(data_root="data/shapenet_simplified",
                                  split='val', normals=True, category="chair")
     v0, f0, v1, f1 = meshset[185]
     print(v0.shape)

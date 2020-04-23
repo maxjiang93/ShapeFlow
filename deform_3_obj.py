@@ -1,3 +1,4 @@
+import sys
 import os
 
 from torch import nn
@@ -21,16 +22,21 @@ m2 = trimesh.load(files[6])
 m3 = trimesh.load(files[7])
 device = torch.device('cuda:0')
 
-chamfer_dist = ChamferDistKDTree(reduction='mean', njobs=1)
+chamfer_dist = ChamferDistKDTree(reduction='mean', njobs=1).to(device)
 criterion = torch.nn.MSELoss()
 
 latent_size = 3
 
-deformer = NeuralFlowDeformer(latent_size=latent_size, f_nlayers=6, f_width=100, s_nlayers=2, s_width=5, nonlinearity='leakyrelu', arch='imnet',
-                              method='rk4', atol=1e-5, rtol=1e-5, adjoint=False).to(device)
-encoder = PointNetEncoder(nf=16, out_features=latent_size).to(device)
+deformer = NeuralFlowDeformer(latent_size=latent_size, f_nlayers=6, f_width=100, s_nlayers=2, s_width=5, method='dopri5', nonlinearity='elu', arch='imnet', adjoint=True,
+                              atol=1e-4, rtol=1e-4).to(device)
+encoder = PointNetEncoder(nf=16, out_features=latent_size, dropout_prob=0.0).to(device)
 
-optimizer = optim.RMSprop(list(deformer.parameters())+list(encoder.parameters()), lr=1e-3)
+# this is an awkward workaround to get gradients for encoder via adjoint solver
+deformer.add_encoder(encoder)
+deformer.to(device)
+encoder = deformer.net.encoder
+
+optimizer = optim.Adam(list(deformer.parameters()), lr=1e-3)
 
 niter = 1000
 npts = 5000
@@ -53,16 +59,19 @@ for it in range(0, niter):
     V2_samp = V2[seq2]
     V3_samp = V3[seq3]
 
-    V_src = torch.stack([V1_samp, V3_samp, V1_samp, V2_samp, V2_samp, V3_samp], dim=0)  # [batch, npoints, 3]
-    V_tar = torch.stack([V3_samp, V1_samp, V2_samp, V1_samp, V3_samp, V2_samp], dim=0)  # [batch, npoints, 3]
+    V_src = torch.stack([V1_samp, V1_samp, V2_samp], dim=0)  # [batch, npoints, 3]
+    V_tar = torch.stack([V2_samp, V3_samp, V3_samp], dim=0)  # [batch, npoints, 3]
     
-    batch_latent_src = encoder(V_src)
-    batch_latent_tar = encoder(V_tar)
-#     print(V_src.shape, batch_latent_src.shape, batch_latent_tar.shape)
-    V_deform = deformer(V_src, batch_latent_src, batch_latent_tar)
+    V_src_tar = torch.cat([V_src, V_tar], dim=0)
+    V_tar_src = torch.cat([V_tar, V_src], dim=0)
     
-
-    _, _, dist = chamfer_dist(V_deform, V_tar)
+    batch_latent_src_tar = encoder(V_src_tar)
+    batch_latent_tar_src = torch.cat([batch_latent_src_tar[3:],
+                                      batch_latent_src_tar[:3]])
+    
+    V_deform = deformer(V_src_tar, batch_latent_src_tar, batch_latent_tar_src)
+    
+    _, _, dist = chamfer_dist(V_deform, V_tar_src)
 
     loss = criterion(dist, torch.zeros_like(dist))
 
@@ -88,8 +97,6 @@ with torch.no_grad():
     V3_1 = deformer(V3.unsqueeze(0), V3_latent, V1_latent).detach().cpu().numpy()[0]
     V2_3 = deformer(V2.unsqueeze(0), V2_latent, V3_latent).detach().cpu().numpy()[0]
     V3_2 = deformer(V3.unsqueeze(0), V3_latent, V2_latent).detach().cpu().numpy()[0]
-
-os.makedirs('demo', exist_ok=True)
 trimesh.Trimesh(V1_2, m1.faces).export('demo/output_1_2.obj')
 trimesh.Trimesh(V2_1, m2.faces).export('demo/output_2_1.obj')
 trimesh.Trimesh(V1_3, m1.faces).export('demo/output_1_3.obj')

@@ -35,6 +35,7 @@ NONLINEARITIES = {
     "square": Lambda(lambda x: x**2),
     "identity": Lambda(lambda x: x),
     "leakyrelu": nn.LeakyReLU(),
+    "tanh10x": Lambda(lambda x: torch.tanh(10*x)),
 }
 
 
@@ -101,7 +102,7 @@ class VanillaNet(nn.Module):
           activation: tf activation op.
           name: str, name of the layer.
         """
-        super(ImNet, self).__init__()
+        super(VanillaNet, self).__init__()
         self.dim = dim
         self.in_features = in_features
         self.dimz = dim + in_features
@@ -237,7 +238,7 @@ class ConformalDeformationFlowNetwork(nn.Module):
 
     
 class DeformationSignNetwork(nn.Module):
-    def __init__(self, latent_size=1, nlayers=3, width=20):
+    def __init__(self, latent_size=1, nlayers=3, width=20, nonlinearity='tanh'):
         """Initialize deformation sign network.
         Args:
           latent_size: int, size of latent space. >= 1.
@@ -249,7 +250,7 @@ class DeformationSignNetwork(nn.Module):
         self.nlayers = nlayers
         self.width = width
         
-        nlin = nn.Tanh()
+        nlin = NONLINEARITIES[nonlinearity]
         modules = [nn.Linear(latent_size, width, bias=False), nlin]
         for i in range(nlayers-2):
             modules += [nn.Linear(width, width, bias=False), nlin]
@@ -291,6 +292,10 @@ class NeuralFlowModel(nn.Module):
         self.latent_updated = False
         self.conformal = conformal
         self.arch = arch
+        self.encoder = None
+        
+    def add_encoder(self, encoder):
+        self.encoder = encoder
     
     def update_latents(self, latent_source, latent_target):
         self.latent_source = latent_source
@@ -348,7 +353,21 @@ class NeuralFlowDeformer(nn.Module):
                                    s_nlayers=s_nlayers, s_width=s_width,
                                    arch=arch, conformal=conformal, 
                                    nonlinearity=nonlinearity)
-
+        
+    @property
+    def adjoint(self):
+        return self.__adjoint
+    
+    
+    @adjoint.setter
+    def adjoint(self, isadjoint):
+        assert(isinstance(isadjoint, bool))
+        self.__adjoint = isadjoint
+        self.odeint = odeint_adjoint if isadjoint else odeint_regular
+        
+    def add_encoder(self, encoder):
+        self.net.add_encoder(encoder)
+        
     def forward(self, points, latent_source, latent_target):
         """Forward transformation (source -> target).
         
@@ -364,3 +383,5 @@ class NeuralFlowDeformer(nn.Module):
         points_transformed = self.odeint(self.net, points, self.timing, 
                                          method=self.method, rtol=self.rtol, atol=self.atol)[1]
         return points_transformed
+
+
