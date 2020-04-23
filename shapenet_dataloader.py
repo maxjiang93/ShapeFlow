@@ -1,7 +1,7 @@
 """ShapeNet deformation dataloader"""
 import os
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 import numpy as np
 import trimesh
 import glob
@@ -26,6 +26,21 @@ synset_to_cat = {
 }
 
 cat_to_synset = {value:key for key, value in synset_to_cat.items()}
+
+
+def idx_to_combinations(idx):
+    """Translate a 1d index to a pair of indices from the combinations."""
+    idx = idx + 1
+    i = np.ceil((-1+np.sqrt(1+8*idx)) / 2)
+    j = idx - (i * (i-1)) / 2
+    return int(i), int(j)-1
+
+def combinations_to_idx(i, j):
+    """Translate a pair of indices to a 1d index from the combinations."""
+    i, j = max(i, j), min(i, j)    
+    idx = 0.5 * i**2 - 0.5 * i + j
+    idx = int(idx)
+    return idx
 
 
 class ShapeNetBase(Dataset):
@@ -74,14 +89,6 @@ class ShapeNetBase(Dataset):
     @property
     def n_shapes(self):
         return len(self.files)
-    
-    @staticmethod
-    def _idx_to_combinations(idx):
-        """Translate a 1d index to a pair of indices from the combinations."""
-        idx = idx + 1
-        i = np.ceil((-1+np.sqrt(1+8*idx)) / 2)
-        j = idx - (i * (i-1)) / 2
-        return int(i), int(j)-1
     
     def restrict_subset(self, indices):
         """Restrict data to the subset of data as indicated by the indices.
@@ -164,7 +171,7 @@ class ShapeNetVertexSampler(ShapeNetBase):
           thumb_i: (optional) [H, W, 3] int8 tensor for thumbnail image for the first mesh.
           thumb_j: (optional) [H, W, 3] int8 tensor for thumbnail image for the second mesh.
         """
-        i, j = self._idx_to_combinations(idx)
+        i, j = idx_to_combinations(idx)
         if self.thumbnails:
             verts_i, thumb_i = self._get_one_mesh(i)
             verts_j, thumb_j = self._get_one_mesh(j)
@@ -200,7 +207,7 @@ class ShapeNetMeshLoader(ShapeNetBase):
           verts_j: [#vj, 3 or 6] float tensor for vertices from the second mesh.
           faces_j: [#fj, 3 or 6] int32 tensor for faces from the second mesh.
         """
-        i, j = self._idx_to_combinations(idx)
+        i, j = idx_to_combinations(idx)
         
         mesh_i = trimesh.load(self.files[i])
         mesh_j = trimesh.load(self.files[j])
@@ -223,28 +230,56 @@ class ShapeNetMeshLoader(ShapeNetBase):
         faces_j = torch.from_numpy(faces_j)
         
         return verts_i, faces_i, verts_j, faces_j
+    
 
+def neighbor_grah_sampler(Sampler):
+    """Data sampler for sampling pairs from top-k nearest latent neighbors.
+    """
+    def __init__(self, n_samples, k, idx_to_fname_dict):
+        self.n_samples = int(n_samples)
+        self.k = int(k)
+        self.tree = None
         
+    def update_graph(self, dataloader, encoder):
+        """Update nearest neighbor graph.
+        
+        Args:
+          dataloader: torch dataloader that feeds
+          (list of batch filenames, tensor of shape [batch, npoints, 3 or 6]) batched point cloud.
+          encoder: encoder that takes [batch, npoints, 3 or 6] and returns [batch, lat_dims].
+        """
+        
+        
+
+    def __iter__(self):
+        return iter(range(len(self.data_source)))
+
+    def __len__(self):
+        return self.n_samples
+
+
 if __name__ == "__main__":
-    # simple test
-    dataset = ShapeNetVertexSampler(data_root="data/shapenet_watertight",
-                                    split='val', nsamples=5000, normals=True, category="chair")
-    print(f"Number of unique combinations of shapes: {len(dataset)}")
-    print(f"Number of unique shapes: {dataset.n_shapes}")
-    v0, v1 = dataset[185]
-    print(v0.shape)
-    print(v1.shape)
-    print(f"# shapes: {len(dataset)}, # combinations: {dataset.n_shapes}")
+    pass
+#     # simple test
+#     dataset = ShapeNetVertexSampler(data_root="data/shapenet_watertight",
+#                                     split='val', nsamples=5000, normals=True, category="chair")
+#     print(f"Number of unique combinations of shapes: {len(dataset)}")
+#     print(f"Number of unique shapes: {dataset.n_shapes}")
+#     v0, v1 = dataset[185]
+#     print(v0.shape)
+#     print(v1.shape)
+#     print(f"# shapes: {len(dataset)}, # combinations: {dataset.n_shapes}")
     
-    dataset.restrict_subset([0, 6, 7])
-    print(f"# shapes: {len(dataset)}, # combinations: {dataset.n_shapes}")
-    print(dataset.files)
+#     dataset.restrict_subset([0, 6, 7])
+#     print(f"# shapes: {len(dataset)}, # combinations: {dataset.n_shapes}")
+#     print(dataset.files)
     
     
-    meshset = ShapeNetMeshLoader(data_root="data/shapenet_simplified",
-                                 split='val', normals=True, category="chair")
-    v0, f0, v1, f1 = meshset[185]
-    print(v0.shape)
-    print(f0.shape)
-    print(v1.shape)
-    print(f1.shape)
+#     meshset = ShapeNetMeshLoader(data_root="data/shapenet_simplified",
+#                                  split='val', normals=True, category="chair")
+#     v0, f0, v1, f1 = meshset[185]
+#     print(v0.shape)
+#     print(f0.shape)
+#     print(v1.shape)
+#     print(f1.shape)
+
