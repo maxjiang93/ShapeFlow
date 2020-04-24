@@ -13,8 +13,8 @@ python shapenet_train.py \
 --atol=1e-4 \
 --rtol=1e-4 \
 --data_root=$data_root \
---pseudo_train_epoch_size=2048 \
---pseudo_eval_epoch_size=128 \
+--pseudo_train_epoch_size=32 \
+--pseudo_eval_epoch_size=32 \
 --lr=1e-3 \
 --log_dir=$log_dir \
 --lr_scheduler \

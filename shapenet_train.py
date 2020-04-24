@@ -1,5 +1,5 @@
-"""Training script shapenet deformation space experiment.
-"""
+# """Training script shapenet deformation space experiment.
+# """
 import argparse
 import json
 import os
@@ -148,20 +148,18 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
     tot_loss /= count
     
     # # visualize embeddings
-    epoch_images = torch.cat(epoch_images, dim=0).permute(0, 3, 1, 2)  # [N,C,H,W]
-    epoch_images = epoch_images.float() / 255.
-    epoch_latents = torch.cat(epoch_latents, dim=0)
-    writer.add_embedding(mat=epoch_latents, label_img=epoch_images, global_step=epoch)
+    if mode == 'eval':
+        epoch_images = torch.cat(epoch_images, dim=0).permute(0, 3, 1, 2)  # [N,C,H,W]
+        epoch_images = epoch_images.float() / 255.
+        epoch_latents = torch.cat(epoch_latents, dim=0)
+        writer.add_embedding(mat=epoch_latents, label_img=epoch_images, global_step=epoch)
     
     # # visualize a few deformation examples in tensorboard
     if args.vis_mesh and (vis_loader is not None) and (mode == 'eval'):
         # add deformation demo
         with torch.set_grad_enabled(False):
-            n_meshes = 2
-            idx_choices = np.random.permutation(len(vis_loader))[:n_meshes]
-            for ind, idx in enumerate(idx_choices):
-                data_tensors = vis_loader[idx] 
-                data_tensors = [t.unsqueeze(0).to(device) for t in data_tensors]
+            for ind, data_tensors in enumerate(vis_loader):  # batch size = 1
+                data_tensors = [t.to(device) for t in data_tensors]
                 vi, fi, vj, fj = data_tensors
                 lat_i = encoder(vi)
                 lat_j = encoder(vj)
@@ -169,12 +167,12 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
                 vj_i = deformer(vj[..., :3], lat_j, lat_i)
                 accu_i, _, _ = chamfer_dist(vi_j, vj)  # [1, m]
                 accu_j, _, _ = chamfer_dist(vj_i, vi)  # [1, n]
-    
+
                 # find the max dist between pairs of original shapes for normalizing colors
                 chamfer_dist.set_reduction_method('max')
                 _, _, max_dist = chamfer_dist(vi, vj)  # [1,]
                 chamfer_dist.set_reduction_method('mean')
-                
+
                 # normalize the accuracies wrt. the distance between src and tgt meshes
                 ci = utils.colorize_scalar_tensors(accu_i / max_dist, 
                                                    vmin=0., vmax=1., cmap='coolwarm')
@@ -182,7 +180,7 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
                                                    vmin=0., vmax=1., cmap='coolwarm')
                 ci = (ci * 255.).int()
                 cj = (cj * 255.).int()
-                
+
                 # add colorized mesh to tensorboard
                 writer.add_mesh(f'samp{ind}/src', vertices=vi, faces=fi, global_step=int(epoch))
                 writer.add_mesh(f'samp{ind}/tar', vertices=vj, faces=fj, global_step=int(epoch))
@@ -293,7 +291,7 @@ def main():
         json.dump(args.__dict__, fh, indent=2)
     logger.info("%s", repr(args))
     
-    n_vis = 2  # number of deformation examples to visualize
+    args.n_vis = 2  # number of deformation examples to visualize
 
     # tensorboard writer
     writer = SummaryWriter(log_dir=os.path.join(args.log_dir, 'tensorboard'))
@@ -322,7 +320,7 @@ def main():
                                                        k=1, replace=replace) # pick the closest
         vis_sampler = dl.LatentNearestNeighborSampler(dataset=fullset, 
                                                        src_split="val", tar_split="train", 
-                                                       n_samples=n_vis, 
+                                                       n_samples=args.n_vis, 
                                                        k=1, replace=replace) # pick the closest
     else:
         args.nn_samp = False
@@ -332,7 +330,7 @@ def main():
         eval_sampler = dl.RandomPairSampler(dataset=fullset, src_split="val", tar_split="train",
                                             n_samples=args.pseudo_eval_epoch_size, replace=replace)
         vis_sampler = dl.RandomPairSampler(dataset=fullset, src_split="val", tar_split="train",
-                                           n_samples=n_vis, replace=replace)
+                                           n_samples=args.n_vis, replace=replace)
 
     # make sure we are turning off shuffle since we are using samplers!
     train_loader = DataLoader(fullset, batch_size=args.batch_size, shuffle=False, drop_last=True,
@@ -346,7 +344,7 @@ def main():
         simpset = dl.ShapeNetMesh(data_root=simp_data_root, split="*", category="chair", 
                                   normals=args.normals)
         assert(vis_sampler.dataset.fname_to_idx_dict == simpset.fname_to_idx_dict)
-        vis_loader = DataLoader(simpset, batch_size=n_vis, shuffle=False, drop_last=False, 
+        vis_loader = DataLoader(simpset, batch_size=1, shuffle=False, drop_last=False, 
                                 sampler=vis_sampler, **kwargs)
     else:
         vis_loader = None
