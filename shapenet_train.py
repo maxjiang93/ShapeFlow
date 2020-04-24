@@ -12,7 +12,7 @@ import deepdeform.utils.train_utils as utils
 from deepdeform.layers.pointnet_layer import PointNetEncoder
 from deepdeform.layers.chamfer_layer import ChamferDistKDTree
 from deepdeform.layers.deformation_layer import NeuralFlowDeformer
-from shapenet_dataloader import ShapeNetVertexSampler, ShapeNetMeshLoader
+import shapenet_dataloader as dl
 
 import torch
 import torch.nn.functional as F
@@ -41,6 +41,32 @@ OPTIMIZERS = {
 
 SOLVERS = ['dopri5', 'adams', 'euler', 'midpoint', 'rk4', 'explicit_adams', 'fixed_adams', 
            'bosh3', 'adaptive_heun', 'tsit5']
+
+
+def compute_latent_dict(dataloader, encoder):
+    """
+    Args:
+        dataloader: torch dataloader that feeds
+                    (list of batch filenames, tensor of shape [batch, npoints, 3 or 6]) 
+                    batched point cloud.
+        encoder: encoder that takes [batch, npoints, 3 or 6] and returns [batch, lat_dims].
+    Returns:
+        a dict that maps filenames to latent codes.
+    """
+    # encode all shapes from dataloader into 
+    all_latents = []
+    all_filenames = []
+    with torch.no_grad():
+        for filenames, batched_points in dataloader:
+            batched_points = batched_points.to(encoder.device)
+            batched_latents = encoder(batched_points)
+            all_filenames += all_filenames
+            all_latents.append(batched_latents.detach().cpu().numpy())
+        
+    # unpack into self.latents
+    all_latents = np.concatenate(all_latents, axis=0)  # [nshapes, lat_dims]
+
+    return dict(zip(all_filenames, all_latents))
 
 
 def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch, 
@@ -244,6 +270,11 @@ def get_args():
     parser.add_argument("--no_pn_batchnorm", dest='pn_batchnorm', action='store_false',
                         help="not use batchnorm within pointnet.")
     parser.set_defaults(pn_batchnorm=True)
+    parser.add_argument("--sampling_method", type=str, 
+                        choices=["nn_replace", "nn_no_replace", "all_replace", "all_no_replace"], 
+                        default="nn_no_replace", help="method for sampling pairs of shape to deform.")
+    parser.add_argument("--topk", type=int, default=5, 
+                        help="top k nearest neighbors to sample from for dynamic_nn sampling method.")
 #     parser.add_argument("--debug", dest='debug', action='store_true',
 #                         help="debug mode on.")
 #     parser.add_argument("--no_debug", dest='debug', action='store_false',
@@ -280,16 +311,30 @@ def main():
     np.random.seed(args.seed)
 
     # create dataloaders
-    trainset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair", 
-                                     nsamples=5000, normals=args.normals)
-    evalset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",
-                                    nsamples=5000, normals=args.normals)
+    trainset = dl.ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair", 
+                                        nsamples=5000, normals=args.normals)
+    evalset = dl.ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",
+                                       nsamples=5000, normals=args.normals)
     
     # return thumbnails for eval set (to visualize embedding)
     evalset.add_thumbnails(args.thumbnails_root)
 
-    train_sampler = RandomSampler(trainset, replacement=True, num_samples=args.pseudo_train_epoch_size)
-    eval_sampler = RandomSampler(evalset, replacement=True, num_samples=args.pseudo_eval_epoch_size)
+    if 'nn_' in args.sampling_method:
+        replace = True if args.sampling_method == "nn_replace" else False
+        train_sampler = dl.LatentNearestNeighborSampler(n_samples=args.pseudo_train_epoch_size, 
+                                                        k=args.topk, 
+                                                        fname_to_idx_dict=trainset.fname_to_idx_dict, 
+                                                        lat_dims=args.lat_dims, replace=replace)
+        eval_sampler = dl.LatentNearestNeighborSampler(n_samples=args.pseudo_eval_epoch_size, 
+                                                       k=1, # for eval, sample the closest shape
+                                                       fname_to_idx_dict=trainset.fname_to_idx_dict, 
+                                                       lat_dims=args.lat_dims, replace=replace)
+    else:
+        replace = True if args.sampling_method == "all_replace" else False
+        train_sampler = RandomPairSampler(n_samples=args.pseudo_train_epoch_size,
+                                          n_shapes=trainset.n_shapes, replace=replace)
+        eval_sampler = RandomPairSampler(n_samples=args.pseudo_eval_epoch_size,
+                                         n_shapes=evalset.n_shapes, replace=replace)
 
     train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=False, drop_last=True,
                               sampler=train_sampler, **kwargs)
@@ -299,8 +344,8 @@ def main():
     if args.vis_mesh:
         # for loading full meshes for visualization
         simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
-        vis_loader = ShapeNetMeshLoader(data_root=simp_data_root, split="val", category="chair", 
-                                        normals=args.normals)
+        vis_loader = dl.ShapeNetMeshLoader(data_root=simp_data_root, split="val", category="chair", 
+                                           normals=args.normals)
     else:
         vis_loader = None
         
@@ -361,11 +406,10 @@ def main():
 
     # training loop
     for epoch in range(start_ep + 1, args.epochs + 1):
-#         loss_train = train_or_eval("train", args, encoder, deformer, chamfer_dist, train_loader, 
-#                                    epoch, global_step, device, logger, writer, optimizer, None)
+        loss_train = train_or_eval("train", args, encoder, deformer, chamfer_dist, train_loader, 
+                                   epoch, global_step, device, logger, writer, optimizer, None)
         loss_eval = train_or_eval("eval", args, encoder, deformer, chamfer_dist, eval_loader, 
                                   epoch, global_step, device, logger, writer, optimizer, vis_loader)
-        break
         if args.lr_scheduler:
             scheduler.step(loss_eval)
         if loss_eval < tracked_stats:
