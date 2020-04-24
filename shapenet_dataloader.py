@@ -9,6 +9,7 @@ import warnings
 import imageio
 import pickle
 from collections import OrderedDict
+from scipy.spatial import cKDTree
 
 
 synset_to_cat = {
@@ -70,7 +71,7 @@ class ShapeNetBase(Dataset):
         self.thumbnails = False
         self._fname_to_idx_dict = None
         
-    @properties
+    @property
     def file_splits(self):
         if self._file_splits is None:
             self._file_splits = {"train": [], "test": [], "val": []}
@@ -89,10 +90,17 @@ class ShapeNetBase(Dataset):
         files = []
         for c in categories:
             synset_id = cat_to_synset[c]
-            cat_folder = os.path.join(data_root, split, synset_id)
-            if not os.path.exists(cat_folder):
-                raise RuntimeError(f"Datafolder for {synset_id} ({c}) does not exist at {cat_folder}.")
-            files += glob.glob(os.path.join(cat_folder, "*/*.ply"))
+            if split != '*':
+                cat_folder = os.path.join(data_root, split, synset_id)
+                if not os.path.exists(cat_folder):
+                    raise RuntimeError(f"Datafolder for {synset_id} ({c}) does not exist at {cat_folder}.")
+                files += glob.glob(os.path.join(cat_folder, "*/*.ply"), recursive=True)
+            else:
+                for split in SPLITS[:3]:
+                    cat_folder = os.path.join(data_root, split, synset_id)
+                    if not os.path.exists(cat_folder):
+                        raise RuntimeError(f"Datafolder for {synset_id} ({c}) does not exist at {cat_folder}.")
+                    files += glob.glob(os.path.join(cat_folder, "*/*.ply"), recursive=True)
         return sorted(files)
         
     def __len__(self):
@@ -118,7 +126,7 @@ class ShapeNetBase(Dataset):
         """
         if self._fname_to_idx_dict is None:
             fnames = ['/'.join(f.split('/')[-4:-1]) for f in self.files]
-            self._fname_to_idx_dict = zip(fnames, list(range(len(fnames))))
+            self._fname_to_idx_dict = dict(zip(fnames, list(range(len(fnames)))))
         return self._fname_to_idx_dict
     
     def idx_to_combinations(self, idx):
@@ -142,7 +150,7 @@ class ShapeNetBase(Dataset):
             idx = int(idx)
         return idx
 
-class ShapeNetVertexSampler(ShapeNetBase):
+class ShapeNetVertex(ShapeNetBase):
     """Pytorch Dataset for sampling vertices from meshes."""
     
     def __init__(self, data_root, split, category="chair", nsamples=5000, normals=True):
@@ -156,7 +164,7 @@ class ShapeNetVertexSampler(ShapeNetBase):
           nsamples: int, number of points to sample from each mesh.
           normals: bool, whether to add normals to the point features.
         """
-        super(ShapeNetVertexSampler, self).__init__(
+        super(ShapeNetVertex, self).__init__(
             data_root=data_root, split=split, category=category)
         self.nsamples = nsamples
         self.normals = normals
@@ -224,7 +232,7 @@ class ShapeNetVertexSampler(ShapeNetBase):
             verts_j = self._get_one_mesh(j)
             return verts_i, verts_j
         
-class ShapeNetMeshLoader(ShapeNetBase):
+class ShapeNetMesh(ShapeNetBase):
     """Pytorch Dataset for sampling entire meshes."""
     
     def __init__(self, data_root, split, category="chair", normals=True):
@@ -236,7 +244,7 @@ class ShapeNetMeshLoader(ShapeNetBase):
           catetory: str, name of the category to train on. 'all' for all 13 classes.
                     Otherwise can be a comma separated string containing multiple names.
         """
-        super(ShapeNetMeshLoader, self).__init__(
+        super(ShapeNetMesh, self).__init__(
             data_root=data_root, split=split, category=category)
         self.normals = normals
         
@@ -299,12 +307,15 @@ class PairSamplerBase(Sampler):
     def __init__(self, dataset, src_split, tar_split, n_samples, replace=False):
         assert(src_split in SPLITS[:3])
         assert(tar_split in SPLITS[:3])
+        self.replace = replace
         self.n_samples = n_samples
         self.src_split = src_split
         self.tar_split = tar_split
         self.dataset = dataset
         self.src_files = self.dataset.file_splits[src_split]
         self.tar_files = self.dataset.file_splits[tar_split]
+        self.src_files = [strip_name(f) for f in self.src_files]
+        self.tar_files = [strip_name(f) for f in self.tar_files]
         self.n_src = len(self.src_files)
         self.n_tar = len(self.tar_files)
         if not replace:
@@ -321,7 +332,7 @@ class RandomPairSampler(PairSamplerBase):
     """Data sampler for sampling random pairs."""
     
     def __init__(self, dataset, src_split, tar_split, n_samples, replace=False):
-        super(RandomPairSampler).__init__(
+        super(RandomPairSampler, self).__init__(
             dataset, src_split, tar_split, n_samples, replace)
         
     def __iter__(self):
@@ -341,7 +352,7 @@ class RandomPairSampler(PairSamplerBase):
         return self.n_samples
     
 
-class LatentNearestNeighborSampler(Sampler):
+class LatentNearestNeighborSampler(PairSamplerBase):
     """Data sampler for sampling pairs from top-k nearest latent neighbors.
     """
     
@@ -353,12 +364,12 @@ class LatentNearestNeighborSampler(Sampler):
           replace: bool, sample with replacement. 
                    if no replace, then must ensure n_samples <= n_shapes
         """
-        super(LatentNearestNeighborSampler).__init__(
+        super(LatentNearestNeighborSampler, self).__init__(
             dataset, src_split, tar_split, n_samples, replace)
         self.k = k
-        self.graph_set = False
+        self.graph_set = False            
         
-    def update_nn_graph(self, tar_latent_dict):
+    def update_nn_graph(self, src_latent_dict, tar_latent_dict):
         """Update nearest neighbor graph.
         
         Args:
@@ -369,24 +380,28 @@ class LatentNearestNeighborSampler(Sampler):
         tar_latents = list(tar_latent_dict.values())
         tar_latents = np.stack(tar_latents, axis=0)  # [n, lat_dim]
         # build kd-tree to accelerate nearest neighbor computation
-        self._kdtree = cKDTree(tar_latents, k=self.k)
+        k = self.k+1 if self.src_split == self.tar_split else self.k
+        self._kdtree = cKDTree(tar_latents)
         
         src_names = list(src_latent_dict.keys())
         src_latents = list(src_latent_dict.values())
         src_latents = np.stack(src_latents, axis=0)  # [m, lat_dim]
-        _, nn_idx = self._kdtree.query(src_latents)  # [m, k]
+        _, nn_idx = self._kdtree.query(src_latents, k=k)  # [m, k]
+        if nn_idx.ndim == 1:
+            nn_idx = nn_idx[:, None]
+        nn_idx = nn_idx[:, -self.k:]
         
         nn_names = []
-        for i in range(nn_idx.shape[0])
+        for i in range(nn_idx.shape[0]):
             nn_names.append([tar_names[j] for j in nn_idx[i]])
         self._nn_map = dict(zip(src_names, nn_names))
         self.graph_set = True
         
-    @properties
+    @property
     def kdtree(self):
         return self._kdtree
     
-    @properties
+    @property
     def nn_map(self):
         return self._nn_map
         
@@ -405,7 +420,7 @@ class LatentNearestNeighborSampler(Sampler):
             tar_name = np.random.choice(self.nn_map[src_name], 1)[0]
             src_idx = d.fname_to_idx_dict[strip_name(src_name)]
             tar_idx = d.fname_to_idx_dict[strip_name(tar_name)]
-            combo_id = combinations_to_idx(src_idx, tar_idx)
+            combo_id = d.combinations_to_idx(src_idx, tar_idx)
             yield combo_id
                                
     def __len__(self):

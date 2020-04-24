@@ -32,5 +32,6 @@ python shapenet_train.py \
 --encoder_nf=32 \
 --dropout_prob=0.0 \
 --nonlin='elu' \
---resume='runs/run_1/checkpoint_latest.pth.tar_deepdeform_036.pth.tar' \
+--sampling_method='nn_no_replace' \
+# --resume='runs/run_1/checkpoint_latest.pth.tar_deepdeform_036.pth.tar' \
 

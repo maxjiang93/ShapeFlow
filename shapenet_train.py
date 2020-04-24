@@ -43,7 +43,7 @@ SOLVERS = ['dopri5', 'adams', 'euler', 'midpoint', 'rk4', 'explicit_adams', 'fix
            'bosh3', 'adaptive_heun', 'tsit5']
 
 
-def compute_latent_dict(dataloader, encoder):
+def compute_latent_dict(dataloader, encoder, device):
     """
     Args:
         dataloader: torch dataloader that feeds
@@ -58,9 +58,9 @@ def compute_latent_dict(dataloader, encoder):
     all_filenames = []
     with torch.no_grad():
         for filenames, batched_points in dataloader:
-            batched_points = batched_points.to(encoder.device)
+            batched_points = batched_points.to(device)
             batched_latents = encoder(batched_points)
-            all_filenames += all_filenames
+            all_filenames += filenames
             all_latents.append(batched_latents.detach().cpu().numpy())
         
     # unpack into self.latents
@@ -92,10 +92,7 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
             tic = time.time()
             # send tensors to device
             data_tensors = [t.to(device) for t in data_tensors]
-            if mode == 'train':
-                source_pts, target_pts = data_tensors
-            else:  # add thumbnail images for visualizing latent embedding
-                source_pts, target_pts, source_img, target_img = data_tensors
+            source_pts, target_pts, source_img, target_img = data_tensors
                 
             bs = len(source_pts)
             optimizer.zero_grad()
@@ -151,7 +148,6 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
     tot_loss /= count
     
     # # visualize embeddings
-    from pdb import set_trace; set_trace()
     epoch_images = torch.cat(epoch_images, dim=0).permute(0, 3, 1, 2)  # [N,C,H,W]
     epoch_images = epoch_images.float() / 255.
     epoch_latents = torch.cat(epoch_latents, dim=0)
@@ -275,13 +271,7 @@ def get_args():
                         default="nn_no_replace", help="method for sampling pairs of shape to deform.")
     parser.add_argument("--topk", type=int, default=5, 
                         help="top k nearest neighbors to sample from for dynamic_nn sampling method.")
-#     parser.add_argument("--debug", dest='debug', action='store_true',
-#                         help="debug mode on.")
-#     parser.add_argument("--no_debug", dest='debug', action='store_false',
-#                         help="debug mode off.")
-#     parser.set_defaults(debug=True)
     
-
     args = parser.parse_args()
     return args
 
@@ -302,6 +292,8 @@ def main():
     with open(os.path.join(args.log_dir, "params.json"), 'w') as fh:
         json.dump(args.__dict__, fh, indent=2)
     logger.info("%s", repr(args))
+    
+    n_vis = 2  # number of deformation examples to visualize
 
     # tensorboard writer
     writer = SummaryWriter(log_dir=os.path.join(args.log_dir, 'tensorboard'))
@@ -311,43 +303,65 @@ def main():
     np.random.seed(args.seed)
 
     # create dataloaders
-    trainset = dl.ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair", 
-                                        nsamples=5000, normals=args.normals)
-    evalset = dl.ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",
-                                       nsamples=5000, normals=args.normals)
+    fullset = dl.ShapeNetVertex(data_root=args.data_root, split="*", category="chair", 
+                                nsamples=5000, normals=args.normals)
     
-    # return thumbnails for eval set (to visualize embedding)
-    evalset.add_thumbnails(args.thumbnails_root)
+    # return thumbnails (to visualize embedding during eval)
+    fullset.add_thumbnails(args.thumbnails_root)
 
     if 'nn_' in args.sampling_method:
+        args.nn_samp = True
         replace = True if args.sampling_method == "nn_replace" else False
-        train_sampler = dl.LatentNearestNeighborSampler(n_samples=args.pseudo_train_epoch_size, 
-                                                        k=args.topk, 
-                                                        fname_to_idx_dict=trainset.fname_to_idx_dict, 
-                                                        lat_dims=args.lat_dims, replace=replace)
-        eval_sampler = dl.LatentNearestNeighborSampler(n_samples=args.pseudo_eval_epoch_size, 
-                                                       k=1, # for eval, sample the closest shape
-                                                       fname_to_idx_dict=trainset.fname_to_idx_dict, 
-                                                       lat_dims=args.lat_dims, replace=replace)
+        train_sampler = dl.LatentNearestNeighborSampler(dataset=fullset, 
+                                                        src_split="train", tar_split="train", 
+                                                        n_samples=args.pseudo_train_epoch_size, 
+                                                        k=args.topk, replace=replace)
+        eval_sampler = dl.LatentNearestNeighborSampler(dataset=fullset, 
+                                                       src_split="val", tar_split="train", 
+                                                       n_samples=args.pseudo_eval_epoch_size, 
+                                                       k=1, replace=replace) # pick the closest
+        vis_sampler = dl.LatentNearestNeighborSampler(dataset=fullset, 
+                                                       src_split="val", tar_split="train", 
+                                                       n_samples=n_vis, 
+                                                       k=1, replace=replace) # pick the closest
     else:
+        args.nn_samp = False
         replace = True if args.sampling_method == "all_replace" else False
-        train_sampler = RandomPairSampler(n_samples=args.pseudo_train_epoch_size,
-                                          n_shapes=trainset.n_shapes, replace=replace)
-        eval_sampler = RandomPairSampler(n_samples=args.pseudo_eval_epoch_size,
-                                         n_shapes=evalset.n_shapes, replace=replace)
+        train_sampler = dl.RandomPairSampler(dataset=fullset, src_split="train", tar_split="train",
+                                             n_samples=args.pseudo_train_epoch_size, replace=replace)
+        eval_sampler = dl.RandomPairSampler(dataset=fullset, src_split="val", tar_split="train",
+                                            n_samples=args.pseudo_eval_epoch_size, replace=replace)
+        vis_sampler = dl.RandomPairSampler(dataset=fullset, src_split="val", tar_split="train",
+                                           n_samples=n_vis, replace=replace)
 
-    train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=False, drop_last=True,
+    # make sure we are turning off shuffle since we are using samplers!
+    train_loader = DataLoader(fullset, batch_size=args.batch_size, shuffle=False, drop_last=True,
                               sampler=train_sampler, **kwargs)
-    eval_loader = DataLoader(evalset, batch_size=args.batch_size, shuffle=False, drop_last=False,
+    eval_loader = DataLoader(fullset, batch_size=args.batch_size, shuffle=False, drop_last=False,
                              sampler=eval_sampler, **kwargs)
 
     if args.vis_mesh:
         # for loading full meshes for visualization
         simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
-        vis_loader = dl.ShapeNetMeshLoader(data_root=simp_data_root, split="val", category="chair", 
-                                           normals=args.normals)
+        simpset = dl.ShapeNetMesh(data_root=simp_data_root, split="*", category="chair", 
+                                  normals=args.normals)
+        assert(vis_sampler.dataset.fname_to_idx_dict == simpset.fname_to_idx_dict)
+        vis_loader = DataLoader(simpset, batch_size=n_vis, shuffle=False, drop_last=False, 
+                                sampler=vis_sampler, **kwargs)
     else:
         vis_loader = None
+    
+    if args.nn_samp:
+        encoding_bs = 32
+        # fixed points loader to compute latent dictionaries
+        train_pkl = args.data_root.replace('shapenet_watertight', 'shapenet_train.pkl')
+        eval_pkl = args.data_root.replace('shapenet_watertight', 'shapenet_val.pkl')
+        fixed_trainset = dl.FixedPointsCachedDataset(train_pkl)
+        fixed_evalset = dl.FixedPointsCachedDataset(eval_pkl)
+        fixed_trainloader = DataLoader(fixed_trainset, batch_size=encoding_bs, shuffle=False, 
+                                       drop_last=False, **kwargs)
+        fixed_evalloader = DataLoader(fixed_evalset, batch_size=encoding_bs, shuffle=False, 
+                                      drop_last=False, **kwargs)
         
     # setup model
     in_feat = 6 if args.normals else 3
@@ -406,6 +420,15 @@ def main():
 
     # training loop
     for epoch in range(start_ep + 1, args.epochs + 1):
+        # set sampler nn graph before train or eval
+        if args.nn_samp:
+            train_latent_dict = compute_latent_dict(fixed_trainloader, encoder, device)
+            eval_latent_dict = compute_latent_dict(fixed_evalloader, encoder, device)
+
+            train_loader.sampler.update_nn_graph(train_latent_dict, train_latent_dict)
+            eval_loader.sampler.update_nn_graph(eval_latent_dict, train_latent_dict)
+            vis_loader.sampler.update_nn_graph(eval_latent_dict, train_latent_dict)
+        
         loss_train = train_or_eval("train", args, encoder, deformer, chamfer_dist, train_loader, 
                                    epoch, global_step, device, logger, writer, optimizer, None)
         loss_eval = train_or_eval("eval", args, encoder, deformer, chamfer_dist, eval_loader, 
