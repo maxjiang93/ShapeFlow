@@ -298,7 +298,7 @@ def main():
                                   adjoint=args.adjoint, rtol=args.rtol, atol=args.atol)
 
     deformer.to(device)
-    lat_params = torch.nn.Parameter(torch.randn(trainset.n_shapes, args.lat_dims)*1e-2)
+    lat_params = torch.nn.Parameter(torch.randn(trainset.n_shapes, args.lat_dims)*1e-1)
     
     all_model_params = list(deformer.parameters()) + [lat_params]
 
