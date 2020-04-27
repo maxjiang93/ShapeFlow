@@ -141,7 +141,10 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
                         100. * batch_idx / len(dataloader), loss.item(),
                         np.sqrt(loss.item()), tic - toc, time.time() - tic))
                 # tensorboard log
-                writer.add_scalar(f'{mode}/loss_sum', loss, global_step=int(global_step))
+                writer.add_scalar(f'{mode}/loss_sum', loss.item(), 
+                                  global_step=int(global_step))
+                writer.add_scalar(f'{mode}/dist_mean', np.sqrt(loss.item()), 
+                                  global_step=int(global_step))
             
             if mode == 'train': global_step += 1
             toc = time.time()
