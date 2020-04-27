@@ -19,7 +19,7 @@ python shapenet_train.py \
 --log_dir=$log_dir \
 --lr_scheduler \
 --visualize_mesh \
---batch_size_per_gpu=8 \
+--batch_size_per_gpu=6 \
 --log_interval=10 \
 --no_adjoint \
 --epochs=100 \

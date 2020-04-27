@@ -97,6 +97,9 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
             _, _, dist = chamfer_dist(deformed_pts, target_source_points[..., :3])
 
             loss = criterion(dist, torch.zeros_like(dist))
+            
+            # check amount of deformation
+            deform_abs = torch.mean(torch.norm(deformed_pts - source_target_points, dim=-1))
 
             if mode == 'train': 
                 loss.backward()
@@ -114,10 +117,11 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
                 logger.info(
                     "{} Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\t"
                     "Dist Mean: {:.6f}\t"
+                    "Deform Mean: {:.6f}\t"
                     "DataTime: {:.4f}\tComputeTime: {:.4f}".format(
                         mode, epoch, batch_idx * bs, len(dataloader) * bs,
                         100. * batch_idx / len(dataloader), loss.item(),
-                        np.sqrt(loss.item()), tic - toc, time.time() - tic))
+                        np.sqrt(loss.item()), deform_abs.item(), tic - toc, time.time() - tic))
                 # tensorboard log
                 writer.add_scalar(f'{mode}/loss_sum', loss, global_step=int(global_step))
             
@@ -126,10 +130,11 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
     tot_loss /= count
     
     # # visualize embeddings
-    epoch_images = torch.cat(epoch_images, dim=0).permute(0, 3, 1, 2)  # [N,C,H,W]
-    epoch_images = epoch_images.float() / 255.
-    epoch_latents = torch.cat(epoch_latents, dim=0)
-    writer.add_embedding(mat=epoch_latents, label_img=epoch_images, global_step=epoch)
+    if mode == 'eval':
+        epoch_images = torch.cat(epoch_images, dim=0).permute(0, 3, 1, 2)  # [N,C,H,W]
+        epoch_images = epoch_images.float() / 255.
+        epoch_latents = torch.cat(epoch_latents, dim=0)
+        writer.add_embedding(mat=epoch_latents, label_img=epoch_images, global_step=epoch)
     
     # # visualize a few deformation examples in tensorboard
     if args.vis_mesh and (vis_loader is not None) and (mode == 'eval'):
@@ -139,10 +144,12 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
             idx_choices = np.random.permutation(len(vis_loader))[:n_meshes]
             for ind, idx in enumerate(idx_choices):
                 data_tensors = vis_loader[idx] 
-                data_tensors = [t.unsqueeze(0).to(device) for t in data_tensors]
+                ii = data_tensors[0]
+                jj = data_tensors[1]
+                data_tensors = [t.unsqueeze(0).to(device) for t in data_tensors[2:]]
                 vi, fi, vj, fj = data_tensors
-                lat_i = encoder(vi)
-                lat_j = encoder(vj)
+                lat_i = lat_params[ii:ii+1]
+                lat_j = lat_params[jj:jj+1]
                 vi_j = deformer(vi[..., :3], lat_i, lat_j)
                 vj_i = deformer(vj[..., :3], lat_j, lat_i)
                 accu_i, _, _ = chamfer_dist(vi_j, vj)  # [1, m]
@@ -262,9 +269,9 @@ def main():
 
     # create dataloaders
     trainset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair", 
-                                     nsamples=5000, normals=args.normals)
+                                     nsamples=5000, normals=False)
     evalset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair",
-                                    nsamples=5000, normals=args.normals)
+                                    nsamples=5000, normals=False)
     
     # return thumbnails for eval set (to visualize embedding)
     evalset.add_thumbnails(args.thumbnails_root)
@@ -281,7 +288,7 @@ def main():
         # for loading full meshes for visualization
         simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
         vis_loader = ShapeNetMeshLoader(data_root=simp_data_root, split="val", category="chair", 
-                                        normals=args.normals)
+                                        normals=False)
     else:
         vis_loader = None
         
@@ -291,11 +298,12 @@ def main():
                                   adjoint=args.adjoint, rtol=args.rtol, atol=args.atol)
 
     deformer.to(device)
-    lat_params = torch.nn.Parameter(torch.randn(trainset.n_shapes, args.lat_dims)).to(device)
+    lat_params = torch.nn.Parameter(torch.randn(trainset.n_shapes, args.lat_dims)*1e-2)
     
     all_model_params = list(deformer.parameters()) + [lat_params]
 
     optimizer = OPTIMIZERS[args.optim](all_model_params, lr=args.lr)
+    lat_params = lat_params.to(device)
     start_ep = 0
     global_step = np.zeros(1, dtype=np.uint32)
     tracked_stats = np.inf
