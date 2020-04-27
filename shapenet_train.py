@@ -43,7 +43,7 @@ SOLVERS = ['dopri5', 'adams', 'euler', 'midpoint', 'rk4', 'explicit_adams', 'fix
            'bosh3', 'adaptive_heun', 'tsit5']
 
 
-def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch, 
+def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, epoch, 
                   global_step, device, logger, writer, optimizer, vis_loader=None):
     """Training / Eval function."""
     modes = ["train", "eval"]
@@ -67,9 +67,9 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
             # send tensors to device
             data_tensors = [t.to(device) for t in data_tensors]
             if mode == 'train':
-                source_pts, target_pts = data_tensors
+                ii, jj, source_pts, target_pts = data_tensors
             else:  # add thumbnail images for visualizing latent embedding
-                source_pts, target_pts, source_img, target_img = data_tensors
+                ii, jj, source_pts, target_pts, source_img, target_img = data_tensors
                 
             bs = len(source_pts)
             optimizer.zero_grad()
@@ -80,10 +80,11 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
             source_target_points = torch.cat([source_pts, target_pts], dim=0)
             target_source_points = torch.cat([target_pts, source_pts], dim=0)
             
-            source_target_latents = encoder(source_target_points)
-            target_source_latents = torch.cat([source_target_latents[bs:],
-                                               source_target_latents[:bs]], dim=0)
-            
+            source_latents = lat_params[ii]
+            target_latents = lat_params[jj]
+            source_target_latents = torch.cat([source_latents, target_latents], dim=0)
+            target_source_latents = torch.cat([target_latents, source_latents], dim=0)
+
             deformed_pts = deformer(source_target_points[..., :3], 
                                     source_target_latents, target_source_latents)
             
@@ -125,7 +126,6 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
     tot_loss /= count
     
     # # visualize embeddings
-    from pdb import set_trace; set_trace()
     epoch_images = torch.cat(epoch_images, dim=0).permute(0, 3, 1, 2)  # [N,C,H,W]
     epoch_images = epoch_images.float() / 255.
     epoch_latents = torch.cat(epoch_latents, dim=0)
@@ -213,17 +213,11 @@ def get_args():
     parser.add_argument("-n", "--nsamples", default=2048, type=int,
                         help="number of sample points to draw per shape.")
     parser.add_argument("--lat_dims", default=32, type=int, help="number of latent dimensions.")
-    parser.add_argument("--encoder_nf", default=32, type=int,
-                        help="number of base number of feature layers in encoder (pointnet).")
     parser.add_argument("--deformer_nf", default=100, type=int,
                         help="number of base number of feature layers in deformer (imnet).")
     parser.add_argument("--lr_scheduler", dest='lr_scheduler', action='store_true')
     parser.add_argument("--no_lr_scheduler", dest='lr_scheduler', action='store_false')
     parser.set_defaults(lr_scheduler=True)
-    parser.add_argument("--normals", dest='normals', action='store_true',
-                        help='add normals to input point features fed to the pointnet encoder.')
-    parser.add_argument("--no_normals", dest='normals', action='store_false',
-                        help='not add normals to input point features fed to the pointnet encoder.')
     parser.set_defaults(normals=True)
     parser.add_argument("--visualize_mesh", dest='vis_mesh', action='store_true',
                         help="visualize deformation for meshes of sample validation data in tensorboard.")
@@ -237,19 +231,6 @@ def get_args():
     parser.set_defaults(adjoint=True)
     parser.add_argument("--clip_grad", default=1., type=float,
                         help="clip gradient to this value. large value basically deactivates it.")
-    parser.add_argument("--dropout_prob", default=0., type=float,
-                        help="dropout probability in pointnet encoder.")
-    parser.add_argument("--pn_batchnorm", dest='pn_batchnorm', action='store_true',
-                        help="use batchnorm within pointnet.")
-    parser.add_argument("--no_pn_batchnorm", dest='pn_batchnorm', action='store_false',
-                        help="not use batchnorm within pointnet.")
-    parser.set_defaults(pn_batchnorm=True)
-#     parser.add_argument("--debug", dest='debug', action='store_true',
-#                         help="debug mode on.")
-#     parser.add_argument("--no_debug", dest='debug', action='store_false',
-#                         help="debug mode off.")
-#     parser.set_defaults(debug=True)
-    
 
     args = parser.parse_args()
     return args
@@ -282,7 +263,7 @@ def main():
     # create dataloaders
     trainset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair", 
                                      nsamples=5000, normals=args.normals)
-    evalset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",
+    evalset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair",
                                     nsamples=5000, normals=args.normals)
     
     # return thumbnails for eval set (to visualize embedding)
@@ -305,21 +286,14 @@ def main():
         vis_loader = None
         
     # setup model
-    in_feat = 6 if args.normals else 3
-    norm_type = 'batchnorm' if args.pn_batchnorm else 'none'
-    encoder = PointNetEncoder(nf=args.encoder_nf, in_features=in_feat, out_features=args.lat_dims, 
-                              norm_type=norm_type, dropout_prob=args.dropout_prob)
     deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=2, 
                                   s_width=5, method=args.solver, nonlinearity=args.nonlin, arch='imnet',
                                   adjoint=args.adjoint, rtol=args.rtol, atol=args.atol)
-    
-    # this is an awkward workaround to get gradients for encoder via adjoint solver
-    deformer.add_encoder(encoder)
-    deformer.to(device)
-    encoder = deformer.net.encoder
 
-    # by wrapping encoder into deformer, no need to add encoder parameters individually
-    all_model_params = deformer.parameters()
+    deformer.to(device)
+    lat_params = torch.nn.Parameter(torch.randn(trainset.n_shapes, args.lat_dims)).to(device)
+    
+    all_model_params = list(deformer.parameters()) + [lat_params]
 
     optimizer = OPTIMIZERS[args.optim](all_model_params, lr=args.lr)
     start_ep = 0
@@ -334,25 +308,23 @@ def main():
         tracked_stats = resume_dict["tracked_stats"]
         deformer.load_state_dict(resume_dict["deformer_state_dict"])
         optimizer.load_state_dict(resume_dict["optim_state_dict"])
+        lat_params.load_state_dict(resume_dict["lat_params"])
         for state in optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
                     state[k] = v.to(device)
-        encoder = deformer.net.encoder
         logger.info("[!] Successfully loaded checkpoint.")
         
 
     # more threads don't seem to help
     chamfer_dist = ChamferDistKDTree(reduction='mean', njobs=1)
     chamfer_dist.to(device)
-    encoder = nn.DataParallel(encoder)
-    encoder.to(device)
     deformer = nn.DataParallel(deformer)
     deformer.to(device)
 
     model_param_count = lambda model: sum(x.numel() for x in model.parameters())
-    logger.info(("{}(encoder) + {}(deformer) paramerters in total"
-                 .format(model_param_count(encoder), model_param_count(deformer))))
+    logger.info(("{}(deformer) paramerters in total"
+                 .format(model_param_count(deformer))))
 
     checkpoint_path = os.path.join(args.log_dir, "checkpoint_latest.pth.tar")
 
@@ -361,9 +333,9 @@ def main():
 
     # training loop
     for epoch in range(start_ep + 1, args.epochs + 1):
-#         loss_train = train_or_eval("train", args, encoder, deformer, chamfer_dist, train_loader, 
-#                                    epoch, global_step, device, logger, writer, optimizer, None)
-        loss_eval = train_or_eval("eval", args, encoder, deformer, chamfer_dist, eval_loader, 
+        loss_train = train_or_eval("train", args, lat_params, deformer, chamfer_dist, train_loader, 
+                                   epoch, global_step, device, logger, writer, optimizer, None)
+        loss_eval = train_or_eval("eval", args, lat_params, deformer, chamfer_dist, eval_loader, 
                                   epoch, global_step, device, logger, writer, optimizer, vis_loader)
         break
         if args.lr_scheduler:
@@ -377,6 +349,7 @@ def main():
         utils.save_checkpoint({
             "epoch": epoch,
             "deformer_state_dict": deformer.module.state_dict(),
+            "lat_params": lat_params(),
             "optim_state_dict": optimizer.state_dict(),
             "tracked_stats": tracked_stats,
             "global_step": global_step,

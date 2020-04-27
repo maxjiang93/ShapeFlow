@@ -1,6 +1,6 @@
 #!/bin/bash
 
-run_name=run_1
+run_name=run_encless
 log_dir=runs/$run_name
 data_root=data/shapenet_watertight
 
@@ -18,19 +18,14 @@ python shapenet_train.py \
 --lr=1e-3 \
 --log_dir=$log_dir \
 --lr_scheduler \
---no_normals \
 --visualize_mesh \
---pn_batchnorm \
 --batch_size_per_gpu=8 \
 --log_interval=10 \
---adjoint \
+--no_adjoint \
 --epochs=100 \
---solver='dopri5' \
+--solver='rk4' \
 --deformer_nf=128 \
 --nsamples=2048 \
---lat_dims=64 \
---encoder_nf=32 \
---dropout_prob=0.0 \
---nonlin='elu' \
---resume='runs/run_1/checkpoint_latest.pth.tar_deepdeform_036.pth.tar' \
+--lat_dims=128 \
+--nonlin='leakyrelu' \
 

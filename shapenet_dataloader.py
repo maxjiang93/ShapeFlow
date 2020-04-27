@@ -168,11 +168,11 @@ class ShapeNetVertexSampler(ShapeNetBase):
         if self.thumbnails:
             verts_i, thumb_i = self._get_one_mesh(i)
             verts_j, thumb_j = self._get_one_mesh(j)
-            return verts_i, verts_j, thumb_i, thumb_j
+            return i, j, verts_i, verts_j, thumb_i, thumb_j
         else:
             verts_i = self._get_one_mesh(i)
             verts_j = self._get_one_mesh(j)
-            return verts_i, verts_j
+            return i, j, verts_i, verts_j
         
 class ShapeNetMeshLoader(ShapeNetBase):
     """Pytorch Dataset for sampling entire meshes."""
@@ -222,7 +222,7 @@ class ShapeNetMeshLoader(ShapeNetBase):
         verts_j = torch.from_numpy(verts_j)
         faces_j = torch.from_numpy(faces_j)
         
-        return verts_i, faces_i, verts_j, faces_j
+        return i, j, verts_i, faces_i, verts_j, faces_j
 
         
 if __name__ == "__main__":
