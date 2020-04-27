@@ -1,6 +1,6 @@
 #!/bin/bash
 
-run_name=run_encless
+run_name=run_encless_18obj_dissim
 log_dir=runs/$run_name
 data_root=data/shapenet_watertight
 
@@ -22,10 +22,11 @@ python shapenet_train.py \
 --batch_size_per_gpu=6 \
 --log_interval=10 \
 --no_adjoint \
---epochs=100 \
+--epochs=101 \
 --solver='rk4' \
 --deformer_nf=128 \
 --nsamples=2048 \
 --lat_dims=128 \
 --nonlin='leakyrelu' \
+# --resume='runs/run_encless/checkpoint_latest.pth.tar_deepdeform_100.pth.tar'
 

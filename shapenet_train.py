@@ -7,6 +7,7 @@ import glob
 import numpy as np
 from collections import defaultdict
 import time
+import trimesh
 
 import deepdeform.utils.train_utils as utils
 from deepdeform.layers.pointnet_layer import PointNetEncoder
@@ -168,6 +169,18 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
                 ci = (ci * 255.).int()
                 cj = (cj * 255.).int()
                 
+                # save mesh
+                samp_dir = os.path.join(args.log_dir, "deformation_samples")
+                os.makedirs(samp_dir, exist_ok=True)
+                trimesh.Trimesh(vi.detach().cpu().numpy()[0],
+                                fi.detach().cpu().numpy()[0]).export(os.path.join(samp_dir, f"samp{ind}_src.obj"))
+                trimesh.Trimesh(vj.detach().cpu().numpy()[0],
+                                fj.detach().cpu().numpy()[0]).export(os.path.join(samp_dir, f"samp{ind}_tar.obj"))
+                trimesh.Trimesh(vi_j.detach().cpu().numpy()[0],
+                                fi.detach().cpu().numpy()[0]).export(os.path.join(samp_dir, f"samp{ind}_src_to_tar.obj"))
+                trimesh.Trimesh(vj_i.detach().cpu().numpy()[0],
+                                fj.detach().cpu().numpy()[0]).export(os.path.join(samp_dir, f"samp{ind}_tar_to_src.obj"))
+                
                 # add colorized mesh to tensorboard
                 writer.add_mesh(f'samp{ind}/src', vertices=vi, faces=fi, global_step=int(epoch))
                 writer.add_mesh(f'samp{ind}/tar', vertices=vj, faces=fj, global_step=int(epoch))
@@ -268,10 +281,12 @@ def main():
     np.random.seed(args.seed)
 
     # create dataloaders
-    trainset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair", 
+    trainset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",   # DEBUG: train->val
                                      nsamples=5000, normals=False)
-    evalset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair",
+    evalset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",   # DEBUG: train->val
                                     nsamples=5000, normals=False)
+    trainset.restrict_subset(np.arange(18))  # DEBUG
+    evalset.restrict_subset(np.arange(18))  # DEBUG
     
     # return thumbnails for eval set (to visualize embedding)
     evalset.add_thumbnails(args.thumbnails_root)
@@ -287,8 +302,9 @@ def main():
     if args.vis_mesh:
         # for loading full meshes for visualization
         simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
-        vis_loader = ShapeNetMeshLoader(data_root=simp_data_root, split="val", category="chair", 
+        vis_loader = ShapeNetMeshLoader(data_root=simp_data_root, split="val", category="chair",      # DEBUG: train->val
                                         normals=False)
+        vis_loader.restrict_subset(np.arange(18))  #DEBUG
     else:
         vis_loader = None
         
@@ -316,7 +332,8 @@ def main():
         tracked_stats = resume_dict["tracked_stats"]
         deformer.load_state_dict(resume_dict["deformer_state_dict"])
         optimizer.load_state_dict(resume_dict["optim_state_dict"])
-        lat_params.load_state_dict(resume_dict["lat_params"])
+        lat_params = resume_dict["lat_params"]
+        lat_params.to(device)
         for state in optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
@@ -345,7 +362,6 @@ def main():
                                    epoch, global_step, device, logger, writer, optimizer, None)
         loss_eval = train_or_eval("eval", args, lat_params, deformer, chamfer_dist, eval_loader, 
                                   epoch, global_step, device, logger, writer, optimizer, vis_loader)
-        break
         if args.lr_scheduler:
             scheduler.step(loss_eval)
         if loss_eval < tracked_stats:
@@ -357,7 +373,7 @@ def main():
         utils.save_checkpoint({
             "epoch": epoch,
             "deformer_state_dict": deformer.module.state_dict(),
-            "lat_params": lat_params(),
+            "lat_params": lat_params,
             "optim_state_dict": optimizer.state_dict(),
             "tracked_stats": tracked_stats,
             "global_step": global_step,
