@@ -96,6 +96,9 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
             _, _, dist = chamfer_dist(deformed_pts, target_source_points[..., :3])
 
             loss = criterion(dist, torch.zeros_like(dist))
+            
+            # check amount of deformation
+            deform_abs = torch.mean(torch.norm(deformed_pts - source_target_points, dim=-1))
 
             if mode == 'train': 
                 loss.backward()
@@ -113,23 +116,26 @@ def train_or_eval(mode, args, encoder, deformer, chamfer_dist, dataloader, epoch
                 logger.info(
                     "{} Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}\t"
                     "Dist Mean: {:.6f}\t"
+                    "Deform Mean: {:.6f}\t"
                     "DataTime: {:.4f}\tComputeTime: {:.4f}".format(
                         mode, epoch, batch_idx * bs, len(dataloader) * bs,
                         100. * batch_idx / len(dataloader), loss.item(),
-                        np.sqrt(loss.item()), tic - toc, time.time() - tic))
+                        np.sqrt(loss.item()), deform_abs.item(), tic - toc, time.time() - tic))
                 # tensorboard log
-                writer.add_scalar(f'{mode}/loss_sum', loss, global_step=int(global_step))
+                writer.add_scalar(f'{mode}/loss_sum', loss.item(), global_step=int(global_step))
+                writer.add_scalar(f'{mode}/def_mean', deform_abs.item(), global_step=int(global_step))
+                writer.add_scalar(f'{mode}/dist_mean', np.sqrt(loss.item()), global_step=int(global_step))
             
             if mode == 'train': global_step += 1
             toc = time.time()
     tot_loss /= count
     
     # # visualize embeddings
-    from pdb import set_trace; set_trace()
-    epoch_images = torch.cat(epoch_images, dim=0).permute(0, 3, 1, 2)  # [N,C,H,W]
-    epoch_images = epoch_images.float() / 255.
-    epoch_latents = torch.cat(epoch_latents, dim=0)
-    writer.add_embedding(mat=epoch_latents, label_img=epoch_images, global_step=epoch)
+    if mode == "eval":
+        epoch_images = torch.cat(epoch_images, dim=0).permute(0, 3, 1, 2)  # [N,C,H,W]
+        epoch_images = epoch_images.float() / 255.
+        epoch_latents = torch.cat(epoch_latents, dim=0)
+        writer.add_embedding(mat=epoch_latents, label_img=epoch_images, global_step=epoch)
     
     # # visualize a few deformation examples in tensorboard
     if args.vis_mesh and (vis_loader is not None) and (mode == 'eval'):
@@ -280,10 +286,12 @@ def main():
     np.random.seed(args.seed)
 
     # create dataloaders
-    trainset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair", 
+    trainset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair", 
                                      nsamples=5000, normals=args.normals)
     evalset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",
                                     nsamples=5000, normals=args.normals)
+    trainset.restrict_subset(np.arange(18))
+    evalset.restrict_subset(np.arange(18))
     
     # return thumbnails for eval set (to visualize embedding)
     evalset.add_thumbnails(args.thumbnails_root)
@@ -301,6 +309,7 @@ def main():
         simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
         vis_loader = ShapeNetMeshLoader(data_root=simp_data_root, split="val", category="chair", 
                                         normals=args.normals)
+        vis_loader.restrict_subset(np.arange(18))
     else:
         vis_loader = None
         
@@ -361,11 +370,10 @@ def main():
 
     # training loop
     for epoch in range(start_ep + 1, args.epochs + 1):
-#         loss_train = train_or_eval("train", args, encoder, deformer, chamfer_dist, train_loader, 
-#                                    epoch, global_step, device, logger, writer, optimizer, None)
+        loss_train = train_or_eval("train", args, encoder, deformer, chamfer_dist, train_loader, 
+                                   epoch, global_step, device, logger, writer, optimizer, None)
         loss_eval = train_or_eval("eval", args, encoder, deformer, chamfer_dist, eval_loader, 
                                   epoch, global_step, device, logger, writer, optimizer, vis_loader)
-        break
         if args.lr_scheduler:
             scheduler.step(loss_eval)
         if loss_eval < tracked_stats:

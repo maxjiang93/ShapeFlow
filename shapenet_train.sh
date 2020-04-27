@@ -1,13 +1,13 @@
 #!/bin/bash
 
-run_name=run_1
+run_name=run_encx0.1_18obj_dissim
 log_dir=runs/$run_name
 data_root=data/shapenet_watertight
 
 # module load pytorch/v1.4.0-gpu
 mkdir -p runs
 
-export CUDA_VISIBLE_DEVICES=0,1
+export CUDA_VISIBLE_DEVICES=1,2
 
 python shapenet_train.py \
 --atol=1e-4 \
@@ -21,16 +21,16 @@ python shapenet_train.py \
 --no_normals \
 --visualize_mesh \
 --pn_batchnorm \
---batch_size_per_gpu=8 \
+--batch_size_per_gpu=6 \
 --log_interval=10 \
---adjoint \
+--no_adjoint \
 --epochs=100 \
---solver='dopri5' \
+--solver='rk4' \
 --deformer_nf=128 \
 --nsamples=2048 \
 --lat_dims=64 \
 --encoder_nf=32 \
 --dropout_prob=0.0 \
---nonlin='elu' \
---resume='runs/run_1/checkpoint_latest.pth.tar_deepdeform_036.pth.tar' \
+--nonlin='leakyrelu' \
+# --resume='runs/run_1/checkpoint_latest.pth.tar_deepdeform_036.pth.tar' \
 
