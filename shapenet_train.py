@@ -104,7 +104,7 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
 
             if mode == 'train': 
                 loss.backward()
-                
+                from pdb import set_trace; set_trace()
                 # gradient clipping
                 torch.nn.utils.clip_grad_value_(deformer.module.parameters(), args.clip_grad)
                 
@@ -281,10 +281,10 @@ def main():
     np.random.seed(args.seed)
 
     # create dataloaders
-    trainset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",   # DEBUG: train->val
-                                     nsamples=5000, normals=False)
-    evalset = ShapeNetVertexSampler(data_root=args.data_root, split="val", category="chair",   # DEBUG: train->val
-                                    nsamples=5000, normals=False)
+    trainset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair",   # DEBUG: train->val
+                                     nsamples=args.nsamples, normals=False)
+    evalset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair",   # DEBUG: train->val
+                                    nsamples=args.nsamples, normals=False)
     trainset.restrict_subset(np.arange(18))  # DEBUG
     evalset.restrict_subset(np.arange(18))  # DEBUG
     
@@ -302,7 +302,7 @@ def main():
     if args.vis_mesh:
         # for loading full meshes for visualization
         simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
-        vis_loader = ShapeNetMeshLoader(data_root=simp_data_root, split="val", category="chair",      # DEBUG: train->val
+        vis_loader = ShapeNetMeshLoader(data_root=simp_data_root, split="train", category="chair",      # DEBUG: train->val
                                         normals=False)
         vis_loader.restrict_subset(np.arange(18))  #DEBUG
     else:
@@ -312,14 +312,11 @@ def main():
     deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=2, 
                                   s_width=5, method=args.solver, nonlinearity=args.nonlin, arch='imnet',
                                   adjoint=args.adjoint, rtol=args.rtol, atol=args.atol)
-
-    deformer.to(device)
+    
     lat_params = torch.nn.Parameter(torch.randn(trainset.n_shapes, args.lat_dims)*1e-1)
     
-    all_model_params = list(deformer.parameters()) + [lat_params]
+    
 
-    optimizer = OPTIMIZERS[args.optim](all_model_params, lr=args.lr)
-    lat_params = lat_params.to(device)
     start_ep = 0
     global_step = np.zeros(1, dtype=np.uint32)
     tracked_stats = np.inf
@@ -333,13 +330,20 @@ def main():
         deformer.load_state_dict(resume_dict["deformer_state_dict"])
         optimizer.load_state_dict(resume_dict["optim_state_dict"])
         lat_params = resume_dict["lat_params"]
-        lat_params.to(device)
         for state in optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
                     state[k] = v.to(device)
         logger.info("[!] Successfully loaded checkpoint.")
         
+    # awkward workaround to get gradients from odeint_adjoint to lat_params
+    deformer.lat_params = lat_params
+    deformer.to(device)
+    lat_params = deformer.lat_params
+    
+    all_model_params = list(deformer.parameters()) + [lat_params]
+
+    optimizer = OPTIMIZERS[args.optim](all_model_params, lr=args.lr)
 
     # more threads don't seem to help
     chamfer_dist = ChamferDistKDTree(reduction='mean', njobs=1)
