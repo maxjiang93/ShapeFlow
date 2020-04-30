@@ -44,7 +44,7 @@ SOLVERS = ['dopri5', 'adams', 'euler', 'midpoint', 'rk4', 'explicit_adams', 'fix
            'bosh3', 'adaptive_heun', 'tsit5']
 
 
-def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, epoch, 
+def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch, 
                   global_step, device, logger, writer, optimizer, vis_loader=None):
     """Training / Eval function."""
     modes = ["train", "eval"]
@@ -81,17 +81,25 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
             source_target_points = torch.cat([source_pts, target_pts], dim=0)
             target_source_points = torch.cat([target_pts, source_pts], dim=0)
             
-            source_latents = lat_params[ii]
-            target_latents = lat_params[jj]
-            source_target_latents = torch.cat([source_latents, target_latents], dim=0)
-            target_source_latents = torch.cat([target_latents, source_latents], dim=0)
-
-            deformed_pts = deformer(source_target_points[..., :3], 
-                                    source_target_latents, target_source_latents)
+#             source_latents = deformer.module.get_lat_params(ii)
+#             target_latents = deformer.module.get_lat_params(jj)
+#             source_target_latents = torch.cat([source_latents, target_latents], dim=0)
+#             target_source_latents = torch.cat([target_latents, source_latents], dim=0)
+#             hub = torch.zeros_like(source_target_latents)
+            source_target_latents = torch.cat([ii, jj], dim=0)
+            target_source_latents = torch.cat([jj, ii], dim=0)
+            latent_seq = torch.stack([source_target_latents, target_source_latents], dim=1)
+            deformed_pts = deformer(source_target_points[..., :3],  
+                                    latent_seq)
+#             deformed_pts = deformer(source_hub_points[..., :3], 
+#                                     hub, target_source_latents)
+#             deformed_pts = deformer(source_target_points[..., :3], 
+#                                     source_target_latents, target_source_latents)
             
             if mode == 'eval':
                 # add thumbnail images for visualizing latent embedding
                 epoch_images += [torch.cat([source_img, target_img], dim=0)]
+                source_target_latents = deformer.module.get_lat_params(source_target_latents)
                 epoch_latents += [source_target_latents]
 
             # symmetric pair of matching losses
@@ -111,7 +119,7 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
                 optimizer.step()
 
             tot_loss += loss.item()
-            count += source_pts.size()[0]
+            count += bs
             
             if batch_idx % args.log_interval == 0:
                 # logger log
@@ -124,7 +132,9 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
                         100. * batch_idx / len(dataloader), loss.item(),
                         np.sqrt(loss.item()), deform_abs.item(), tic - toc, time.time() - tic))
                 # tensorboard log
-                writer.add_scalar(f'{mode}/loss_sum', loss, global_step=int(global_step))
+                writer.add_scalar(f'{mode}/loss_sum', loss.item(), global_step=int(global_step))
+                writer.add_scalar(f'{mode}/dist_avg', np.sqrt(loss.item()), global_step=int(global_step))
+                writer.add_scalar(f'{mode}/def_mean', deform_abs.item(), global_step=int(global_step))
             
             if mode == 'train': global_step += 1
             toc = time.time()
@@ -145,14 +155,23 @@ def train_or_eval(mode, args, lat_params, deformer, chamfer_dist, dataloader, ep
             idx_choices = np.random.permutation(len(vis_loader))[:n_meshes]
             for ind, idx in enumerate(idx_choices):
                 data_tensors = vis_loader[idx] 
-                ii = data_tensors[0]
-                jj = data_tensors[1]
+                ii = torch.tensor([data_tensors[0]], dtype=torch.long)
+                jj = torch.tensor([data_tensors[1]], dtype=torch.long)
+                
+                source_latents = deformer.module.get_lat_params(ii)
+                target_latents = deformer.module.get_lat_params(jj)
+                hub_latents = torch.zeros_like(source_latents)
+                
                 data_tensors = [t.unsqueeze(0).to(device) for t in data_tensors[2:]]
+                
                 vi, fi, vj, fj = data_tensors
-                lat_i = lat_params[ii:ii+1]
-                lat_j = lat_params[jj:jj+1]
-                vi_j = deformer(vi[..., :3], lat_i, lat_j)
-                vj_i = deformer(vj[..., :3], lat_j, lat_i)
+                vi_j = deformer(vi[..., :3], torch.stack([source_latents, target_latents], dim=1))
+                vj_i = deformer(vj[..., :3], torch.stack([target_latents, source_latents], dim=1))
+#                 vi_h = deformer(vi[..., :3], source_latents, hub_latents)
+#                 vi_j = deformer(vi_h[..., :3], hub_latents, target_latents)
+#                 vj_h = deformer(vj[..., :3], target_latents, hub_latents)
+#                 vj_i = deformer(vj_h[..., :3], hub_latents, source_latents)
+                
                 accu_i, _, _ = chamfer_dist(vi_j, vj)  # [1, m]
                 accu_j, _, _ = chamfer_dist(vj_i, vi)  # [1, n]
     
@@ -311,11 +330,16 @@ def main():
     # setup model
     deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=2, 
                                   s_width=5, method=args.solver, nonlinearity=args.nonlin, arch='imnet',
-                                  adjoint=args.adjoint, rtol=args.rtol, atol=args.atol)
+                                  adjoint=args.adjoint, rtol=args.rtol, atol=args.atol, via_hub=True)
+        
+    # awkward workaround to get gradients from odeint_adjoint to lat_params
+    lat_params = torch.nn.Parameter(torch.randn(trainset.n_shapes, args.lat_dims)*1e-1, requires_grad=True)
+    deformer.add_lat_params(lat_params)
+    deformer.to(device)
     
-    lat_params = torch.nn.Parameter(torch.randn(trainset.n_shapes, args.lat_dims)*1e-1)
-    
-    
+    all_model_params = list(deformer.parameters())
+
+    optimizer = OPTIMIZERS[args.optim](all_model_params, lr=args.lr)
 
     start_ep = 0
     global_step = np.zeros(1, dtype=np.uint32)
@@ -329,21 +353,13 @@ def main():
         tracked_stats = resume_dict["tracked_stats"]
         deformer.load_state_dict(resume_dict["deformer_state_dict"])
         optimizer.load_state_dict(resume_dict["optim_state_dict"])
-        lat_params = resume_dict["lat_params"]
         for state in optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
                     state[k] = v.to(device)
         logger.info("[!] Successfully loaded checkpoint.")
         
-    # awkward workaround to get gradients from odeint_adjoint to lat_params
-    deformer.lat_params = lat_params
-    deformer.to(device)
-    lat_params = deformer.lat_params
     
-    all_model_params = list(deformer.parameters()) + [lat_params]
-
-    optimizer = OPTIMIZERS[args.optim](all_model_params, lr=args.lr)
 
     # more threads don't seem to help
     chamfer_dist = ChamferDistKDTree(reduction='mean', njobs=1)
@@ -362,9 +378,9 @@ def main():
 
     # training loop
     for epoch in range(start_ep + 1, args.epochs + 1):
-        loss_train = train_or_eval("train", args, lat_params, deformer, chamfer_dist, train_loader, 
+        loss_train = train_or_eval("train", args, deformer, chamfer_dist, train_loader, 
                                    epoch, global_step, device, logger, writer, optimizer, None)
-        loss_eval = train_or_eval("eval", args, lat_params, deformer, chamfer_dist, eval_loader, 
+        loss_eval = train_or_eval("eval", args, deformer, chamfer_dist, eval_loader, 
                                   epoch, global_step, device, logger, writer, optimizer, vis_loader)
         if args.lr_scheduler:
             scheduler.step(loss_eval)

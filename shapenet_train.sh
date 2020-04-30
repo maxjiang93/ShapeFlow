@@ -1,6 +1,6 @@
 #!/bin/bash
 
-run_name=run2_encless_18obj_dopri5_512pts
+run_name=run_hub_spoke_4746
 log_dir=runs/$run_name
 data_root=data/shapenet_watertight
 
