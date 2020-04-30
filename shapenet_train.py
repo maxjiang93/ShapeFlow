@@ -81,20 +81,11 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
             source_target_points = torch.cat([source_pts, target_pts], dim=0)
             target_source_points = torch.cat([target_pts, source_pts], dim=0)
             
-#             source_latents = deformer.module.get_lat_params(ii)
-#             target_latents = deformer.module.get_lat_params(jj)
-#             source_target_latents = torch.cat([source_latents, target_latents], dim=0)
-#             target_source_latents = torch.cat([target_latents, source_latents], dim=0)
-#             hub = torch.zeros_like(source_target_latents)
             source_target_latents = torch.cat([ii, jj], dim=0)
             target_source_latents = torch.cat([jj, ii], dim=0)
             latent_seq = torch.stack([source_target_latents, target_source_latents], dim=1)
             deformed_pts = deformer(source_target_points[..., :3],  
-                                    latent_seq)
-#             deformed_pts = deformer(source_hub_points[..., :3], 
-#                                     hub, target_source_latents)
-#             deformed_pts = deformer(source_target_points[..., :3], 
-#                                     source_target_latents, target_source_latents)
+                                    latent_seq)  # already set to via_hub
             
             if mode == 'eval':
                 # add thumbnail images for visualizing latent embedding
@@ -112,7 +103,7 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
 
             if mode == 'train': 
                 loss.backward()
-                from pdb import set_trace; set_trace()
+
                 # gradient clipping
                 torch.nn.utils.clip_grad_value_(deformer.module.parameters(), args.clip_grad)
                 
@@ -165,12 +156,8 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
                 data_tensors = [t.unsqueeze(0).to(device) for t in data_tensors[2:]]
                 
                 vi, fi, vj, fj = data_tensors
-                vi_j = deformer(vi[..., :3], torch.stack([source_latents, target_latents], dim=1))
-                vj_i = deformer(vj[..., :3], torch.stack([target_latents, source_latents], dim=1))
-#                 vi_h = deformer(vi[..., :3], source_latents, hub_latents)
-#                 vi_j = deformer(vi_h[..., :3], hub_latents, target_latents)
-#                 vj_h = deformer(vj[..., :3], target_latents, hub_latents)
-#                 vj_i = deformer(vj_h[..., :3], hub_latents, source_latents)
+                vi_j = deformer(vi[..., :3], torch.stack([source_latents, hub_latents, target_latents], dim=1))
+                vj_i = deformer(vj[..., :3], torch.stack([target_latents, hub_latents, source_latents], dim=1))
                 
                 accu_i, _, _ = chamfer_dist(vi_j, vj)  # [1, m]
                 accu_j, _, _ = chamfer_dist(vj_i, vi)  # [1, n]
@@ -304,8 +291,8 @@ def main():
                                      nsamples=args.nsamples, normals=False)
     evalset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair",   # DEBUG: train->val
                                     nsamples=args.nsamples, normals=False)
-    trainset.restrict_subset(np.arange(18))  # DEBUG
-    evalset.restrict_subset(np.arange(18))  # DEBUG
+#     trainset.restrict_subset(np.arange(18))  # DEBUG
+#     evalset.restrict_subset(np.arange(18))  # DEBUG
     
     # return thumbnails for eval set (to visualize embedding)
     evalset.add_thumbnails(args.thumbnails_root)
@@ -323,7 +310,7 @@ def main():
         simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
         vis_loader = ShapeNetMeshLoader(data_root=simp_data_root, split="train", category="chair",      # DEBUG: train->val
                                         normals=False)
-        vis_loader.restrict_subset(np.arange(18))  #DEBUG
+#         vis_loader.restrict_subset(np.arange(18))  #DEBUG
     else:
         vis_loader = None
         

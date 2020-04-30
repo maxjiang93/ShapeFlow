@@ -1,13 +1,13 @@
 #!/bin/bash
 
-run_name=run_hub_spoke_4746
+run_name=run_hub_spoke_all_chair
 log_dir=runs/$run_name
 data_root=data/shapenet_watertight
 
 # module load pytorch/v1.4.0-gpu
 mkdir -p runs
 
-export CUDA_VISIBLE_DEVICES=1,2
+export CUDA_VISIBLE_DEVICES=0
 
 python shapenet_train.py \
 --atol=1e-4 \
@@ -19,7 +19,7 @@ python shapenet_train.py \
 --log_dir=$log_dir \
 --lr_scheduler \
 --visualize_mesh \
---batch_size_per_gpu=24 \
+--batch_size_per_gpu=32 \
 --log_interval=10 \
 --adjoint \
 --epochs=101 \
@@ -28,5 +28,5 @@ python shapenet_train.py \
 --nsamples=512 \
 --lat_dims=128 \
 --nonlin='leakyrelu' \
-# --resume='runs/run_encless/checkpoint_latest.pth.tar_deepdeform_100.pth.tar'
+# --resume='runs/run_hub_spoke_all_chair/checkpoint_latest.pth.tar_deepdeform_085.pth.tar'
 
