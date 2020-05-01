@@ -1,5 +1,5 @@
-"""Training script shapenet deformation space experiment.
-"""
+# """Training script shapenet deformation space experiment.
+# """
 import argparse
 import json
 import os
@@ -13,7 +13,7 @@ import deepdeform.utils.train_utils as utils
 from deepdeform.layers.pointnet_layer import PointNetEncoder
 from deepdeform.layers.chamfer_layer import ChamferDistKDTree
 from deepdeform.layers.deformation_layer import NeuralFlowDeformer
-from shapenet_dataloader import ShapeNetVertexSampler, ShapeNetMeshLoader
+import shapenet_dataloader as dl
 
 import torch
 import torch.nn.functional as F
@@ -42,6 +42,32 @@ OPTIMIZERS = {
 
 SOLVERS = ['dopri5', 'adams', 'euler', 'midpoint', 'rk4', 'explicit_adams', 'fixed_adams', 
            'bosh3', 'adaptive_heun', 'tsit5']
+
+
+def compute_latent_dict(dataloader, encoder, device):
+    """
+    Args:
+        dataloader: torch dataloader that feeds
+                    (list of batch filenames, tensor of shape [batch, npoints, 3 or 6]) 
+                    batched point cloud.
+        encoder: encoder that takes [batch, npoints, 3 or 6] and returns [batch, lat_dims].
+    Returns:
+        a dict that maps filenames to latent codes.
+    """
+    # encode all shapes from dataloader into 
+    all_latents = []
+    all_filenames = []
+    with torch.no_grad():
+        for filenames, batched_points in dataloader:
+            batched_points = batched_points.to(device)
+            batched_latents = encoder(batched_points)
+            all_filenames += filenames
+            all_latents.append(batched_latents.detach().cpu().numpy())
+        
+    # unpack into self.latents
+    all_latents = np.concatenate(all_latents, axis=0)  # [nshapes, lat_dims]
+
+    return dict(zip(all_filenames, all_latents))
 
 
 def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch, 
@@ -142,10 +168,7 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
     if args.vis_mesh and (vis_loader is not None) and (mode == 'eval'):
         # add deformation demo
         with torch.set_grad_enabled(False):
-            n_meshes = 2
-            idx_choices = np.random.permutation(len(vis_loader))[:n_meshes]
-            for ind, idx in enumerate(idx_choices):
-                data_tensors = vis_loader[idx] 
+            for ind, data_tensors in enumerate(vis_loader):  # batch size = 1
                 ii = torch.tensor([data_tensors[0]], dtype=torch.long)
                 jj = torch.tensor([data_tensors[1]], dtype=torch.long)
                 
@@ -154,19 +177,18 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
                 hub_latents = torch.zeros_like(source_latents)
                 
                 data_tensors = [t.unsqueeze(0).to(device) for t in data_tensors[2:]]
-                
                 vi, fi, vj, fj = data_tensors
                 vi_j = deformer(vi[..., :3], torch.stack([source_latents, hub_latents, target_latents], dim=1))
                 vj_i = deformer(vj[..., :3], torch.stack([target_latents, hub_latents, source_latents], dim=1))
                 
                 accu_i, _, _ = chamfer_dist(vi_j, vj)  # [1, m]
                 accu_j, _, _ = chamfer_dist(vj_i, vi)  # [1, n]
-    
+
                 # find the max dist between pairs of original shapes for normalizing colors
                 chamfer_dist.set_reduction_method('max')
                 _, _, max_dist = chamfer_dist(vi, vj)  # [1,]
                 chamfer_dist.set_reduction_method('mean')
-                
+
                 # normalize the accuracies wrt. the distance between src and tgt meshes
                 ci = utils.colorize_scalar_tensors(accu_i / max_dist, 
                                                    vmin=0., vmax=1., cmap='coolwarm')
@@ -257,7 +279,6 @@ def get_args():
     parser.set_defaults(adjoint=True)
     parser.add_argument("--clip_grad", default=1., type=float,
                         help="clip gradient to this value. large value basically deactivates it.")
-
     args = parser.parse_args()
     return args
 
@@ -278,6 +299,8 @@ def main():
     with open(os.path.join(args.log_dir, "params.json"), 'w') as fh:
         json.dump(args.__dict__, fh, indent=2)
     logger.info("%s", repr(args))
+    
+    args.n_vis = 2  # number of deformation examples to visualize
 
     # tensorboard writer
     writer = SummaryWriter(log_dir=os.path.join(args.log_dir, 'tensorboard'))
@@ -287,32 +310,65 @@ def main():
     np.random.seed(args.seed)
 
     # create dataloaders
-    trainset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair",   # DEBUG: train->val
-                                     nsamples=args.nsamples, normals=False)
-    evalset = ShapeNetVertexSampler(data_root=args.data_root, split="train", category="chair",   # DEBUG: train->val
-                                    nsamples=args.nsamples, normals=False)
-#     trainset.restrict_subset(np.arange(18))  # DEBUG
-#     evalset.restrict_subset(np.arange(18))  # DEBUG
+    fullset = dl.ShapeNetVertex(data_root=args.data_root, split="*", category="chair", 
+                                nsamples=args.nsamples, normals=False)
     
-    # return thumbnails for eval set (to visualize embedding)
-    evalset.add_thumbnails(args.thumbnails_root)
+    # return thumbnails (to visualize embedding during eval)
+    fullset.add_thumbnails(args.thumbnails_root)
 
-    train_sampler = RandomSampler(trainset, replacement=True, num_samples=args.pseudo_train_epoch_size)
-    eval_sampler = RandomSampler(evalset, replacement=True, num_samples=args.pseudo_eval_epoch_size)
+    if 'nn_' in args.sampling_method:
+        args.nn_samp = True
+        replace = True if args.sampling_method == "nn_replace" else False
+        train_sampler = dl.LatentNearestNeighborSampler(dataset=fullset, 
+                                                        src_split="train", tar_split="train", 
+                                                        n_samples=args.pseudo_train_epoch_size, 
+                                                        k=args.topk, replace=replace)
+        eval_sampler = dl.LatentNearestNeighborSampler(dataset=fullset, 
+                                                       src_split="train", tar_split="train", 
+                                                       n_samples=args.pseudo_eval_epoch_size, 
+                                                       k=1, replace=replace) # pick the closest
+        vis_sampler = dl.LatentNearestNeighborSampler(dataset=fullset, 
+                                                       src_split="train", tar_split="train", 
+                                                       n_samples=args.n_vis, 
+                                                       k=1, replace=replace) # pick the closest
+    else:
+        args.nn_samp = False
+        replace = True if args.sampling_method == "all_replace" else False
+        train_sampler = dl.RandomPairSampler(dataset=fullset, src_split="train", tar_split="train",
+                                             n_samples=args.pseudo_train_epoch_size, replace=replace)
+        eval_sampler = dl.RandomPairSampler(dataset=fullset, src_split="train", tar_split="train",
+                                            n_samples=args.pseudo_eval_epoch_size, replace=replace)
+        vis_sampler = dl.RandomPairSampler(dataset=fullset, src_split="train", tar_split="train",
+                                           n_samples=args.n_vis, replace=replace)
 
-    train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=False, drop_last=True,
+    # make sure we are turning off shuffle since we are using samplers!
+    train_loader = DataLoader(fullset, batch_size=args.batch_size, shuffle=False, drop_last=True,
                               sampler=train_sampler, **kwargs)
-    eval_loader = DataLoader(evalset, batch_size=args.batch_size, shuffle=False, drop_last=False,
+    eval_loader = DataLoader(fullset, batch_size=args.batch_size, shuffle=False, drop_last=False,
                              sampler=eval_sampler, **kwargs)
 
     if args.vis_mesh:
         # for loading full meshes for visualization
         simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
-        vis_loader = ShapeNetMeshLoader(data_root=simp_data_root, split="train", category="chair",      # DEBUG: train->val
-                                        normals=False)
-#         vis_loader.restrict_subset(np.arange(18))  #DEBUG
+        simpset = dl.ShapeNetMesh(data_root=simp_data_root, split="train", category="chair", 
+                                  normals=args.normals)
+        assert(vis_sampler.dataset.fname_to_idx_dict == simpset.fname_to_idx_dict)
+        vis_loader = DataLoader(simpset, batch_size=1, shuffle=False, drop_last=False, 
+                                sampler=vis_sampler, **kwargs)
     else:
         vis_loader = None
+    
+    if args.nn_samp:
+        encoding_bs = 32
+        # fixed points loader to compute latent dictionaries
+        train_pkl = args.data_root.replace('shapenet_watertight', 'shapenet_train.pkl')
+        eval_pkl = args.data_root.replace('shapenet_watertight', 'shapenet_val.pkl')
+        fixed_trainset = dl.FixedPointsCachedDataset(train_pkl)
+        fixed_evalset = dl.FixedPointsCachedDataset(eval_pkl)
+        fixed_trainloader = DataLoader(fixed_trainset, batch_size=encoding_bs, shuffle=False, 
+                                       drop_last=False, **kwargs)
+        fixed_evalloader = DataLoader(fixed_evalset, batch_size=encoding_bs, shuffle=False, 
+                                      drop_last=False, **kwargs)
         
     # setup model
     deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=2, 
@@ -365,10 +421,20 @@ def main():
 
     # training loop
     for epoch in range(start_ep + 1, args.epochs + 1):
+        # set sampler nn graph before train or eval
+        if args.nn_samp:
+            train_latent_dict = compute_latent_dict(fixed_trainloader, encoder, device)
+            eval_latent_dict = compute_latent_dict(fixed_evalloader, encoder, device)
+
+            train_loader.sampler.update_nn_graph(train_latent_dict, train_latent_dict)
+            eval_loader.sampler.update_nn_graph(eval_latent_dict, train_latent_dict)
+            vis_loader.sampler.update_nn_graph(eval_latent_dict, train_latent_dict)
+        
         loss_train = train_or_eval("train", args, deformer, chamfer_dist, train_loader, 
                                    epoch, global_step, device, logger, writer, optimizer, None)
         loss_eval = train_or_eval("eval", args, deformer, chamfer_dist, eval_loader, 
                                   epoch, global_step, device, logger, writer, optimizer, vis_loader)
+                                  
         if args.lr_scheduler:
             scheduler.step(loss_eval)
         if loss_eval < tracked_stats:
