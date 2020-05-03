@@ -319,7 +319,9 @@ class PairSamplerBase(Sampler):
         self.n_src = len(self.src_files)
         self.n_tar = len(self.tar_files)
         if not replace:
-            assert(self.n_samples <= self.n_src)
+            if not self.n_samples <= self.n_src:
+                raise RuntimeError(f"Numer of samples ({len(self.n_samples)}) must be "
+                                   f"less than number source shapes ({len(self.n_src)})")
         
     def __iter__(self):
         raise NotImplementedError
@@ -343,9 +345,10 @@ class RandomPairSampler(PairSamplerBase):
         else:
             src_names = np.random.permutation(self.src_files)[:int(self.n_samples)]
             tar_names = np.random.permutation(self.tar_files)[:int(self.n_samples)]
-        src_idxs = [d.fname_to_idx_dict[strip_name(f)] for f in src_names]
-        tar_idxs = [d.fname_to_idx_dict[strip_name(f)] for f in tar_names]
+        src_idxs = np.array([d.fname_to_idx_dict[strip_name(f)] for f in src_names])
+        tar_idxs = np.array([d.fname_to_idx_dict[strip_name(f)] for f in tar_names])
         combo_ids = self.dataset.combinations_to_idx(src_idxs, tar_idxs)
+        
         return iter(combo_ids)
                                
     def __len__(self):
@@ -369,13 +372,15 @@ class LatentNearestNeighborSampler(PairSamplerBase):
         self.k = k
         self.graph_set = False            
         
-    def update_nn_graph(self, src_latent_dict, tar_latent_dict):
+    def update_nn_graph(self, src_latent_dict, tar_latent_dict, k=None):
         """Update nearest neighbor graph.
         
         Args:
           src_latent_dict: a dict that maps filenames to latent codes for source set.
           tar_latent_dict: a dict that maps filenames to latent codes for target set.
         """
+        if k is not None:
+            self.k = k
         tar_names = list(tar_latent_dict.keys())
         tar_latents = list(tar_latent_dict.values())
         tar_latents = np.stack(tar_latents, axis=0)  # [n, lat_dim]

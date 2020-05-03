@@ -1,6 +1,6 @@
 #!/bin/bash
 
-run_name=run_debug
+run_name=run_4746_allnr_nosign
 log_dir=runs/$run_name
 data_root=data/shapenet_simplified
 
@@ -21,12 +21,14 @@ srun python shapenet_train.py \
 --visualize_mesh \
 --batch_size_per_gpu=128 \
 --log_interval=2 \
+--epochs=100 \
+--no_sign_net \
 --adjoint \
---epochs=101 \
 --solver='dopri5' \
 --deformer_nf=128 \
 --nsamples=512 \
 --lat_dims=512 \
 --nonlin='leakyrelu' \
+--sampling_method='all_no_replace' \
 # --resume='runs/run_hub_spoke_all_chair/checkpoint_latest.pth.tar_deepdeform_085.pth.tar'
 

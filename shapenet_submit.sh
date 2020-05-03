@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -o .slurm_logs/run_hs_lat512_bs128_nodyns.out
+#SBATCH -o .slurm_logs/run_4746_nnnr_nosign.out
 #SBATCH -C gpu
 #SBATCH -t 240
 #SBATCH -c 80
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gres=gpu:4
+#SBATCH --gres=gpu:8
 #SBATCH -A dasrepo
 #SBATCH --requeue
 #SBATCH -J pytorch
@@ -16,12 +16,12 @@ mkdir -p logs
 # # move data to SSD
 # cp -r data /tmp
 
-run_name=run_hs_lat512_bs128_nodyns
+run_name=run_4746_nnnr_nosign
 log_dir=runs/$run_name
 data_root=data/shapenet_simplified
 
 # run
-srun -l python shapenet_train.py \
+srun python shapenet_train.py \
 --atol=1e-4 \
 --rtol=1e-4 \
 --data_root=$data_root \
@@ -31,12 +31,14 @@ srun -l python shapenet_train.py \
 --log_dir=$log_dir \
 --lr_scheduler \
 --visualize_mesh \
---batch_size_per_gpu=64 \
+--batch_size_per_gpu=128 \
 --log_interval=2 \
+--epochs=100 \
+--no_sign_net \
 --adjoint \
---epochs=101 \
 --solver='dopri5' \
 --deformer_nf=128 \
 --nsamples=512 \
 --lat_dims=512 \
 --nonlin='leakyrelu' \
+--sampling_method='all_no_replace' \

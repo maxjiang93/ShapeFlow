@@ -1,5 +1,5 @@
-# """Training script shapenet deformation space experiment.
-# """
+"""Training script shapenet deformation space experiment.
+"""
 import argparse
 import json
 import os
@@ -44,30 +44,31 @@ SOLVERS = ['dopri5', 'adams', 'euler', 'midpoint', 'rk4', 'explicit_adams', 'fix
            'bosh3', 'adaptive_heun', 'tsit5']
 
 
-def compute_latent_dict(dataloader, encoder, device):
+def compute_latent_dict(deformer, dataset):
     """
     Args:
-        dataloader: torch dataloader that feeds
-                    (list of batch filenames, tensor of shape [batch, npoints, 3 or 6]) 
-                    batched point cloud.
-        encoder: encoder that takes [batch, npoints, 3 or 6] and returns [batch, lat_dims].
+        deformer:
+        dataset:
     Returns:
         a dict that maps filenames to latent codes.
     """
     # encode all shapes from dataloader into 
-    all_latents = []
-    all_filenames = []
-    with torch.no_grad():
-        for filenames, batched_points in dataloader:
-            batched_points = batched_points.to(device)
-            batched_latents = encoder(batched_points)
-            all_filenames += filenames
-            all_latents.append(batched_latents.detach().cpu().numpy())
-        
-    # unpack into self.latents
-    all_latents = np.concatenate(all_latents, axis=0)  # [nshapes, lat_dims]
+    all_filenames = dataset.file_splits["train"]
+    all_filenames = [dl.strip_name(f) for f in all_filenames]
+    all_latents = deformer.module.net.lat_params.detach().cpu().numpy()
 
     return dict(zip(all_filenames, all_latents))
+
+
+def get_k(epoch):
+    if epoch < 10:
+        return 4000
+    elif epoch < 50:
+        return 800
+    elif epoch < 80:
+        return 100
+    else:
+        return 10
 
 
 def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch, 
@@ -93,10 +94,7 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
             tic = time.time()
             # send tensors to device
             data_tensors = [t.to(device) for t in data_tensors]
-            if mode == 'train':
-                ii, jj, source_pts, target_pts = data_tensors
-            else:  # add thumbnail images for visualizing latent embedding
-                ii, jj, source_pts, target_pts, source_img, target_img = data_tensors
+            ii, jj, source_pts, target_pts, source_img, target_img = data_tensors
                 
             bs = len(source_pts)
             optimizer.zero_grad()
@@ -178,6 +176,10 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
                 
                 data_tensors = [t.unsqueeze(0).to(device) for t in data_tensors[2:]]
                 vi, fi, vj, fj = data_tensors
+                vi = vi[0]
+                fi = fi[0]
+                vj = vj[0]
+                fj = fj[0]
                 vi_j = deformer(vi[..., :3], torch.stack([source_latents, hub_latents, target_latents], dim=1))
                 vj_i = deformer(vj[..., :3], torch.stack([target_latents, hub_latents, source_latents], dim=1))
                 
@@ -261,6 +263,7 @@ def get_args():
     parser.add_argument("-n", "--nsamples", default=2048, type=int,
                         help="number of sample points to draw per shape.")
     parser.add_argument("--lat_dims", default=32, type=int, help="number of latent dimensions.")
+    parser.add_argument("--datasubset", default=0, type=int, help="0 to not subset. else subset this many examples.")
     parser.add_argument("--deformer_nf", default=100, type=int,
                         help="number of base number of feature layers in deformer (imnet).")
     parser.add_argument("--lr_scheduler", dest='lr_scheduler', action='store_true')
@@ -277,8 +280,16 @@ def get_args():
     parser.add_argument("--no_adjoint", dest='adjoint', action='store_false',
                         help='not use adjoint solver to propagate gradients thru odeint.')
     parser.set_defaults(adjoint=True)
+    parser.add_argument("--sign_net", dest='sign_net', action='store_true',
+                        help='use sign net.')
+    parser.add_argument("--no_sign_net", dest='sign_net', action='store_false',
+                        help='not use sign net.')
+    parser.set_defaults(sign_net=False)
     parser.add_argument("--clip_grad", default=1., type=float,
                         help="clip gradient to this value. large value basically deactivates it.")
+    parser.add_argument("--sampling_method", type=str, 
+                        choices=["nn_replace", "nn_no_replace", "all_replace", "all_no_replace"], 
+                        default="nn_no_replace", help="method for sampling pairs of shape to deform.")
     args = parser.parse_args()
     return args
 
@@ -310,8 +321,9 @@ def main():
     np.random.seed(args.seed)
 
     # create dataloaders
-    fullset = dl.ShapeNetVertex(data_root=args.data_root, split="*", category="chair", 
+    fullset = dl.ShapeNetVertex(data_root=args.data_root, split="train", category="chair", 
                                 nsamples=args.nsamples, normals=False)
+    if args.datasubset > 0: fullset.restrict_subset(args.datasubset)
     
     # return thumbnails (to visualize embedding during eval)
     fullset.add_thumbnails(args.thumbnails_root)
@@ -322,7 +334,7 @@ def main():
         train_sampler = dl.LatentNearestNeighborSampler(dataset=fullset, 
                                                         src_split="train", tar_split="train", 
                                                         n_samples=args.pseudo_train_epoch_size, 
-                                                        k=args.topk, replace=replace)
+                                                        k=1000, replace=replace)
         eval_sampler = dl.LatentNearestNeighborSampler(dataset=fullset, 
                                                        src_split="train", tar_split="train", 
                                                        n_samples=args.pseudo_eval_epoch_size, 
@@ -351,32 +363,24 @@ def main():
         # for loading full meshes for visualization
         simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
         simpset = dl.ShapeNetMesh(data_root=simp_data_root, split="train", category="chair", 
-                                  normals=args.normals)
-        assert(vis_sampler.dataset.fname_to_idx_dict == simpset.fname_to_idx_dict)
+                                  normals=False)
+        if args.datasubset > 0: simpset.restrict_subset(args.datasubset)
+        if not (vis_sampler.dataset.fname_to_idx_dict == simpset.fname_to_idx_dict):
+            raise RuntimeError(f"vis_sampler ({len(vis_sampler.dataset.fname_to_idx_dict)})"
+                               f" does not match sample set ({len(simpset.fname_to_idx_dict)})")
         vis_loader = DataLoader(simpset, batch_size=1, shuffle=False, drop_last=False, 
                                 sampler=vis_sampler, **kwargs)
     else:
         vis_loader = None
-    
-    if args.nn_samp:
-        encoding_bs = 32
-        # fixed points loader to compute latent dictionaries
-        train_pkl = args.data_root.replace('shapenet_watertight', 'shapenet_train.pkl')
-        eval_pkl = args.data_root.replace('shapenet_watertight', 'shapenet_val.pkl')
-        fixed_trainset = dl.FixedPointsCachedDataset(train_pkl)
-        fixed_evalset = dl.FixedPointsCachedDataset(eval_pkl)
-        fixed_trainloader = DataLoader(fixed_trainset, batch_size=encoding_bs, shuffle=False, 
-                                       drop_last=False, **kwargs)
-        fixed_evalloader = DataLoader(fixed_evalset, batch_size=encoding_bs, shuffle=False, 
-                                      drop_last=False, **kwargs)
         
     # setup model
     deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=2, 
                                   s_width=5, method=args.solver, nonlinearity=args.nonlin, arch='imnet',
-                                  adjoint=args.adjoint, rtol=args.rtol, atol=args.atol, via_hub=True)
+                                  adjoint=args.adjoint, rtol=args.rtol, atol=args.atol, via_hub=True,
+                                  no_sign_net=(not args.sign_net))
         
     # awkward workaround to get gradients from odeint_adjoint to lat_params
-    lat_params = torch.nn.Parameter(torch.randn(trainset.n_shapes, args.lat_dims)*1e-1, requires_grad=True)
+    lat_params = torch.nn.Parameter(torch.randn(fullset.n_shapes, args.lat_dims)*1e-1, requires_grad=True)
     deformer.add_lat_params(lat_params)
     deformer.to(device)
     
@@ -419,16 +423,14 @@ def main():
     if args.lr_scheduler:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')
 
+    train_latent_dict = compute_latent_dict(deformer, fullset)
     # training loop
     for epoch in range(start_ep + 1, args.epochs + 1):
         # set sampler nn graph before train or eval
-        if args.nn_samp:
-            train_latent_dict = compute_latent_dict(fixed_trainloader, encoder, device)
-            eval_latent_dict = compute_latent_dict(fixed_evalloader, encoder, device)
-
-            train_loader.sampler.update_nn_graph(train_latent_dict, train_latent_dict)
-            eval_loader.sampler.update_nn_graph(eval_latent_dict, train_latent_dict)
-            vis_loader.sampler.update_nn_graph(eval_latent_dict, train_latent_dict)
+        if args.nn_samp:            
+            train_loader.sampler.update_nn_graph(train_latent_dict, train_latent_dict, k=get_k(epoch))
+            eval_loader.sampler.update_nn_graph(train_latent_dict, train_latent_dict)
+            vis_loader.sampler.update_nn_graph(train_latent_dict, train_latent_dict)
         
         loss_train = train_or_eval("train", args, deformer, chamfer_dist, train_loader, 
                                    epoch, global_step, device, logger, writer, optimizer, None)
