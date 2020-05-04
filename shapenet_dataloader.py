@@ -249,28 +249,26 @@ class ShapeNetMesh(ShapeNetBase):
         self.normals = normals
         
     def get_pairs(self, i, j):
+        verts_i, faces_i = self.get_single(i)
+        verts_j, faces_j = self.get_single(j)
+        
+        return i, j, verts_i, faces_i, verts_j, faces_j
+    
+    def get_single(self, i):
         mesh_i = trimesh.load(self.files[i])
-        mesh_j = trimesh.load(self.files[j])
         
         verts_i = mesh_i.vertices.astype(np.float32)
         faces_i = mesh_i.faces.astype(np.int32)
         
-        verts_j = mesh_j.vertices.astype(np.float32)
-        faces_j = mesh_j.faces.astype(np.int32)
-        
         if self.normals:
             norms_i = mesh_i.vertex_normals.astype(np.float32)
-            norms_j = mesh_j.vertex_normals.astype(np.float32)
             verts_i = np.concatenate([verts_i, norms_i], axis=-1)
-            verts_j = np.concatenate([verts_j, norms_j], axis=-1)
         
         verts_i = torch.from_numpy(verts_i)
         faces_i = torch.from_numpy(faces_i)
-        verts_j = torch.from_numpy(verts_j)
-        faces_j = torch.from_numpy(faces_j)
         
-        return i, j, verts_i, faces_i, verts_j, faces_j
-        
+        return verts_i, faces_i
+    
     def __getitem__(self, idx):
         """Get a random pair of meshes.
         Args:
