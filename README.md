@@ -1,7 +1,7 @@
 # DeepDeform
 Learning a Deformation Space for Geometries.
  
-By: [Chiyu "Max" Jiang](http://maxjiang.ml/), [Jingwei Huang](http://stanford.edu/~jingweih/)
+By: [Chiyu "Max" Jiang](http://maxjiang.ml/), [Jingwei Huang](http://stanford.edu/~jingweih/), [Andrea Tagliasacci](http://gfx.uvic.ca/people/ataiya/), [Leonidas Guibas](https://geometry.stanford.edu/member/guibas/)
 
 \[[Project Website]()\] \[[Paper]()\]
  
@@ -16,6 +16,15 @@ We recommend using pip to install all required dependencies with ease.
 pip install -r requirements.txt
 ```
 
+### Optional dependency (rendering)
+We strongly suggest installing the optional dependencies for rendering meshes, so that you can visualize the results using interactive notebooks.
+`pyrender` can be installed via pip:
+```
+pip install pyrender
+```
+
+Additionally to run the notebook renderings on a headless server, follow the [instructions](https://pyrender.readthedocs.io/en/latest/install/#python-installation) for installing `OSMesa`.
+
 ### Download and unpack data
 To download and unpack the data used in the experiment, please use the utility script privided.
 ```
@@ -29,6 +38,17 @@ bash shapenet_train.sh
 ```
 
 The training will launch on all available GPUs. Mask GPUs accordingly if you want to use only a subset of all GPUs. The initial tests are done on NVIDIA Volta V100 GPUs, therefore the `batch_size_per_gpu=16` might need to be adjusted accordingly for GPUs with smaller or larger memory limits if the out of memory error is triggered.
+
+### Load and visualize pretrained checkpoint
+First download the pretrained checkpoint.
+```
+wget island.me.berkeley.edu/files/pretrained_ckpt.zip
+mkdir -p runs
+mv pretrained_ckpt.zip runs
+cd runs; unzip pretrained_ckpt.zip; rm pretrained_ckpt.zip; cd ..
+```
+
+Next, run through the cells in `visualize_deformer.ipynb`.
 
 ### Monitor training
 After launching the training script, a `runs` directory will be created, with different runs each as a separate subfolder within. To monitor the training process based on text logs, use
@@ -57,8 +77,8 @@ If you find our code useful for your work, please consider citing our paper:
 ```
 @inproceedings{
 acoolpaper,
-title={THE PAPER DOES NOT EXIST YET},
-author={Chiyu Max Jiang and Jingwei Huang and our wonderful collaborators},
+title={To be submitted},
+author={Chiyu Max Jiang and Jingwei Huang and Andrea Tagliasacci and Leonidas Guibas},
 booktitle={Maybe Neural Information Processing Systems 2020},
 year={2020},
 }

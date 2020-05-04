@@ -1,15 +1,15 @@
 #!/bin/bash
 
-run_name=run_1
+run_name=run_4746_allnr_nosign
 log_dir=runs/$run_name
-data_root=data/shapenet_watertight
+data_root=data/shapenet_simplified
 
-# module load pytorch/v1.4.0-gpu
+module load pytorch/v1.4.0-gpu
 mkdir -p runs
 
-export CUDA_VISIBLE_DEVICES=0,1
+# export CUDA_VISIBLE_DEVICES=0
 
-python shapenet_train.py \
+srun python shapenet_train.py \
 --atol=1e-4 \
 --rtol=1e-4 \
 --data_root=$data_root \
@@ -18,19 +18,17 @@ python shapenet_train.py \
 --lr=1e-3 \
 --log_dir=$log_dir \
 --lr_scheduler \
---no_normals \
 --visualize_mesh \
---pn_batchnorm \
---batch_size_per_gpu=8 \
---log_interval=10 \
---adjoint \
+--batch_size_per_gpu=128 \
+--log_interval=2 \
 --epochs=100 \
+--no_sign_net \
+--adjoint \
 --solver='dopri5' \
 --deformer_nf=128 \
---nsamples=2048 \
---lat_dims=64 \
---encoder_nf=32 \
---dropout_prob=0.0 \
---nonlin='elu' \
---resume='runs/run_1/checkpoint_latest.pth.tar_deepdeform_036.pth.tar' \
+--nsamples=512 \
+--lat_dims=512 \
+--nonlin='leakyrelu' \
+--sampling_method='all_no_replace' \
+# --resume='runs/run_hub_spoke_all_chair/checkpoint_latest.pth.tar_deepdeform_085.pth.tar'
 

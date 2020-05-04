@@ -8,7 +8,7 @@ import os
 import tqdm
 
 
-files = glob.glob("shapenet_watertight/train/*/*/*.ply")
+files = glob.glob("../data/shapenet_watertight/test/*/*/*.ply")
 outroot = "shapenet_simplified"
 
 for f_in in tqdm.tqdm(files):

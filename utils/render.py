@@ -6,11 +6,11 @@ import pyrender
 import glob
 
 
-def render_mesh(meshname, dist=1.1, res=(640, 640), color=[0., 1., 0.], intensity=3.0):
+def render_trimesh(trimesh_mesh, dist=1.1, res=(640, 640), color=[0., 1., 0.], intensity=3.0):
     """Render a shapenet mesh using default settings.
     
     Args:
-      meshname: str, name of the mesh file.
+      trimesh_mesh: trimesh mesh instance.
       dist: float, camera distance from the object.
       res: 2-tuple of int, resolution of output images.
       color: 3-tuple of float in [0, 1]. color of rendered object.
@@ -18,7 +18,6 @@ def render_mesh(meshname, dist=1.1, res=(640, 640), color=[0., 1., 0.], intensit
       color_img: [*res, 3] color image.
       depth_img: [*res, 1] depth image.
     """
-    trimesh_mesh = trimesh.load(meshname)
     # rotate mesh
     trimesh_mesh.apply_transform(trimesh.transformations.rotation_matrix(2.6*np.pi/2, [0, 1, 0]))
     trimesh_mesh.apply_transform(trimesh.transformations.rotation_matrix(0.3*np.pi/2, [1, 0, 0]))
@@ -47,3 +46,38 @@ def render_mesh(meshname, dist=1.1, res=(640, 640), color=[0., 1., 0.], intensit
     r = pyrender.OffscreenRenderer(*res)
     color_img, depth_img = r.render(scene)
     return color_img, depth_img
+
+
+def render_vf(v, f, dist=1.1, res=(640, 640), color=[0., 1., 0.], intensity=3.0):
+    """Render a shapenet mesh using default settings.
+    
+    Args:
+      v: vertex array.
+      f: face array.
+      dist: float, camera distance from the object.
+      res: 2-tuple of int, resolution of output images.
+      color: 3-tuple of float in [0, 1]. color of rendered object.
+    Returns:
+      color_img: [*res, 3] color image.
+      depth_img: [*res, 1] depth image.
+    """
+    trimesh_mesh = trimesh.Trimesh(v, f)
+    return render_trimesh(trimesh_mesh,
+                          dist=dist, res=res, color=color, intensity=intensity)
+
+
+def render_mesh(meshname, dist=1.1, res=(640, 640), color=[0., 1., 0.], intensity=3.0):
+    """Render a shapenet mesh using default settings.
+    
+    Args:
+      meshname: str, name of the mesh file.
+      dist: float, camera distance from the object.
+      res: 2-tuple of int, resolution of output images.
+      color: 3-tuple of float in [0, 1]. color of rendered object.
+    Returns:
+      color_img: [*res, 3] color image.
+      depth_img: [*res, 1] depth image.
+    """
+    trimesh_mesh = trimesh.load(meshname)
+    return render_trimesh(trimesh_mesh,
+                          dist=dist, res=res, color=color, intensity=intensity)
