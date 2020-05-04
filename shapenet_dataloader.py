@@ -248,18 +248,7 @@ class ShapeNetMesh(ShapeNetBase):
             data_root=data_root, split=split, category=category)
         self.normals = normals
         
-    def __getitem__(self, idx):
-        """Get a random pair of meshes.
-        Args:
-          idx: int, index of the shape pair to return. must be smaller than len(self).
-        Returns:
-          verts_i: [#vi, 3 or 6] float tensor for vertices from the first mesh.
-          faces_i: [#fi, 3 or 6] int32 tensor for faces from the first mesh.
-          verts_j: [#vj, 3 or 6] float tensor for vertices from the second mesh.
-          faces_j: [#fj, 3 or 6] int32 tensor for faces from the second mesh.
-        """
-        i, j = self.idx_to_combinations(idx)
-        
+    def get_pairs(self, i, j):
         mesh_i = trimesh.load(self.files[i])
         mesh_j = trimesh.load(self.files[j])
         
@@ -281,6 +270,19 @@ class ShapeNetMesh(ShapeNetBase):
         faces_j = torch.from_numpy(faces_j)
         
         return i, j, verts_i, faces_i, verts_j, faces_j
+        
+    def __getitem__(self, idx):
+        """Get a random pair of meshes.
+        Args:
+          idx: int, index of the shape pair to return. must be smaller than len(self).
+        Returns:
+          verts_i: [#vi, 3 or 6] float tensor for vertices from the first mesh.
+          faces_i: [#fi, 3 or 6] int32 tensor for faces from the first mesh.
+          verts_j: [#vj, 3 or 6] float tensor for vertices from the second mesh.
+          faces_j: [#fj, 3 or 6] int32 tensor for faces from the second mesh.
+        """
+        i, j = self.idx_to_combinations(idx)
+        return self.get_pairs(i, j)
 
     
 class FixedPointsCachedDataset(Dataset):
