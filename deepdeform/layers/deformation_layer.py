@@ -2,6 +2,7 @@ import torch
 from torch import nn
 from torchdiffeq import odeint_adjoint
 from torchdiffeq import odeint as odeint_regular
+from .pde_layer import PDELayer
 
 import numpy as np
 
@@ -128,13 +129,15 @@ class VanillaNet(nn.Module):
 
 
 class DeformationFlowNetwork(nn.Module):
-    def __init__(self, dim=3, latent_size=1, nlayers=4, width=50, nonlinearity='leakyrelu', arch='imnet'):
+    def __init__(self, dim=3, latent_size=1, nlayers=4, width=50, nonlinearity='leakyrelu', arch='imnet',
+                 divfree=False):
         """Intialize deformation flow network.
         Args:
           dim: int, physical dimensions. Either 2 for 2d or 3 for 3d.
           latent_size: int, size of latent space. >= 1.
           nlayers: int, number of neural network layers. >= 2.
           width: int, number of neurons per hidden layer. >= 1.
+          divfree: bool, paramaterize a divergence free flow.
         """
         super(DeformationFlowNetwork, self).__init__()
         self.dim = dim
@@ -144,6 +147,8 @@ class DeformationFlowNetwork(nn.Module):
         self.nonlinearity = nonlinearity
         
         self.arch = arch
+        self.divfree = divfree
+        
         assert(arch in ['imnet', 'vanilla'])
         if arch == 'imnet':
             self.net = ImNet(dim=dim, in_features=latent_size, out_features=dim, 
@@ -156,6 +161,21 @@ class DeformationFlowNetwork(nn.Module):
             if isinstance(m, nn.Linear):
                 nn.init.normal_(m.weight, mean=0, std=1e-1)
                 nn.init.constant_(m.bias, val=0)
+        if divfree:
+            self.curl = self._get_curl_layer()
+            
+    def _get_curl_layer(self):
+        in_vars = 'x, y, z'
+        out_vars = 'u, v, w'
+        eqn_strs = ['dif(w, y) - dif(v, z)',
+                    'dif(u, z) - dif(w, x)',
+                    'dif(v, x) - dif(u, y)']
+        eqn_names = ['curl_x', 'curl_y', 'curl_z']   # a name/identifier for the equations
+        curl = PDELayer(in_vars=in_vars, out_vars=out_vars)  # initialize the pde layer
+        for eqn_str, eqn_name in zip(eqn_strs, eqn_names):  # add equations
+            curl.add_equation(eqn_str, eqn_name)
+        return curl
+
 
     def forward(self, latent_vector, points):
         """
@@ -166,11 +186,28 @@ class DeformationFlowNetwork(nn.Module):
           velocities: tensor of shape [batch, num_points, dim], velocity at each point
         """
         latent_vector = latent_vector.unsqueeze(1).expand(-1, points.shape[1], -1)  # [batch, num_points, latent_size]
-        points_latents = torch.cat((points, latent_vector), axis=-1)  # [batch, num_points, dim + latent_size]
-        b, n, d = points_latents.shape
-        res = self.net(points_latents.reshape([-1, d]))
-        res = res.reshape([b, n, self.dim])
-        return res
+        # wrapper for pde layer
+        def fwd_fn(points):
+            """Forward function.
+            
+              Where inpt[..., 0], inpt[..., 1], inpt[..., 2] correspond to x, y, z and 
+              out[..., 0], out[..., 1], out[..., 2] correspond to u, v, w
+              """
+            points_latents = torch.cat((points, latent_vector), axis=-1)  # [batch, num_points, dim + latent_size]
+            b, n, d = points_latents.shape
+            res = self.net(points_latents.reshape([-1, d]))
+            res = res.reshape([b, n, self.dim])
+            return res
+        if self.divfree:
+            # return the curl of the velocity field instead
+            self.curl.update_forward_method(fwd_fn)
+            _, res_dict = self.curl(points)  # res are the equation residues
+            res = torch.cat([res_dict['curl_x'],
+                             res_dict['curl_y'],
+                             res_dict['curl_z']], dim=-1)  # [batch, num_points, dim]
+            return res
+        else:
+            return fwd_fn(points)
     
     
 class ConformalDeformationFlowNetwork(nn.Module):
@@ -275,7 +312,8 @@ class DeformationSignNetwork(nn.Module):
     
 class NeuralFlowModel(nn.Module):
     def __init__(self, dim=3, latent_size=1, f_nlayers=4, f_width=50, 
-                 s_nlayers=3, s_width=20, nonlinearity='relu', conformal=False, arch='imnet', no_sign_net=False):
+                 s_nlayers=3, s_width=20, nonlinearity='relu', conformal=False, arch='imnet', no_sign_net=False,
+                 divfree=False):
         super(NeuralFlowModel, self).__init__()
         if conformal:
             model = ConformalDeformationFlowNetwork
@@ -285,7 +323,8 @@ class NeuralFlowModel(nn.Module):
         self.no_sign_net = no_sign_net
         self.flow_net = model(dim=dim, latent_size=latent_size, 
                               nlayers=f_nlayers, width=f_width,
-                              nonlinearity=nonlinearity, arch=arch)
+                              nonlinearity=nonlinearity, arch=arch,
+                              divfree=divfree)
         if not no_sign_net:
             self.sign_net = DeformationSignNetwork(latent_size=latent_size, 
                                                    nlayers=s_nlayers, width=s_width)
@@ -314,6 +353,9 @@ class NeuralFlowModel(nn.Module):
             latent_sequence: long or float tensor of shape [batch, nsteps, latent_size].
                              sequence of latents along deformation path.
                              if long, index into self.lat_params to retrieve latents.
+        Returns:
+            latent_waypoint: float tensor of shape [batch, nsteps], interp coefficient
+                             betwene [0, 1] corresponding to each latent code.
         """
         bs, ns, d = latent_sequence.shape
         dev = latent_sequence.device
@@ -327,7 +369,10 @@ class NeuralFlowModel(nn.Module):
                                           self.latent_seq_bins], dim=1)  # [batch, nsteps]
         self.latent_updated = True
         
+        return self.latent_seq_bins
+        
     def latent_at_t(self, t, return_sign=False):
+        """Helper fn to compute latent at t."""
         t = t.to(self.latent_seq_bins.device)
         # find out which bin this t falls into
         bin_mask = (t > self.latent_seq_bins[:, :-1]) * (t < self.latent_seq_bins[:, 1:])
@@ -379,7 +424,8 @@ class NeuralFlowDeformer(nn.Module):
     def __init__(self, dim=3, latent_size=1, f_nlayers=4, f_width=50, 
                  s_nlayers=3, s_width=20, method='dopri5', nonlinearity='leakyrelu', 
                  arch='imnet', conformal=False, adjoint=True, atol=1e-5, rtol=1e-5,
-                 via_hub=False, no_sign_net=False):
+                 via_hub=False, no_sign_net=False, return_waypoints=False, use_latent_waypoints=False,
+                 divfree=False):
         """Initialize. The parameters are the parameters for the Deformation Flow network.
         Args:
           dim: int, physical dimensions. Either 2 for 2d or 3 for 3d.
@@ -391,8 +437,10 @@ class NeuralFlowDeformer(nn.Module):
           arch: str, architecture, choice of 'imnet' / 'vanilla'
           adjoint: bool, whether to use adjoint solver to backprop gadient thru odeint.
           rtol, atol: float, relative / absolute error tolerence in ode solver.
-          via_hub: will perform transformation via hub-and-spokes configuration.
+          via_hub: bool, will perform transformation via hub-and-spokes configuration.
                    only useful if latent_sequence is torch.long
+          return_waypoints: bool, return intermediate waypoints along timing.
+          use_latent_waypoints: bool, use latent waypoints.
         """
         super(NeuralFlowDeformer, self).__init__()
         self.method = method
@@ -400,7 +448,9 @@ class NeuralFlowDeformer(nn.Module):
         self.arch = arch
         self.adjoint = adjoint
         self.odeint = odeint_adjoint if adjoint else odeint_regular
-        self.timing = torch.from_numpy(np.array([0, 1]).astype('float32'))
+        self.__timing = torch.from_numpy(np.array([0., 1.]).astype('float32'))
+        self.return_waypoints = return_waypoints
+        self.use_latent_waypoints = use_latent_waypoints
         self.rtol = rtol
         self.atol = atol
         self.via_hub = via_hub
@@ -409,18 +459,28 @@ class NeuralFlowDeformer(nn.Module):
                                    f_nlayers=f_nlayers, f_width=f_width,
                                    s_nlayers=s_nlayers, s_width=s_width,
                                    arch=arch, conformal=conformal, 
-                                   nonlinearity=nonlinearity, no_sign_net=no_sign_net)
+                                   nonlinearity=nonlinearity, no_sign_net=no_sign_net,
+                                   divfree=divfree)
         
     @property
     def adjoint(self):
         return self.__adjoint
-    
     
     @adjoint.setter
     def adjoint(self, isadjoint):
         assert(isinstance(isadjoint, bool))
         self.__adjoint = isadjoint
         self.odeint = odeint_adjoint if isadjoint else odeint_regular
+        
+    @property
+    def timing(self):
+        return self.__timing
+    
+    @timing.setter
+    def timing(self, timing):
+        assert(isinstance(timing, torch.Tensor))
+        assert(timing.ndim == 1)
+        self.__timing = timing
         
     def add_encoder(self, encoder):
         self.net.add_encoder(encoder)
@@ -444,7 +504,8 @@ class NeuralFlowDeformer(nn.Module):
                            sequence of latents along deformation path.
                            if long, index into self.lat_params to retrieve latents.
         Returns:
-          points_transformed: [batch, num_points, dim]
+          points_transformed: tensor of shape [batch, num_points, dim] if not self.return_waypoint.
+                              tensor of shape [nsteps, num_points, dim] if self.return_waypoint.
         """
         if latent_sequence.dtype == torch.long:
             latent_sequence = self.get_lat_params(latent_sequence)  # [nsteps, batch, lat_dim]
@@ -454,8 +515,15 @@ class NeuralFlowDeformer(nn.Module):
                 lat0 = latent_sequence[:, 0:1]
                 lat1 = latent_sequence[:, 1:2]
                 latent_sequence = torch.cat([lat0, zeros, lat1], dim=1)  # [batch, nsteps=3, lat_dim]
-        self.net.update_latents(latent_sequence)
-        points_transformed = self.odeint(self.net, points, self.timing, 
-                                         method=self.method, rtol=self.rtol, atol=self.atol)[1]
-        return points_transformed
+        waypoints = self.net.update_latents(latent_sequence)
+        if self.use_latent_waypoints:
+            timing = waypoints[0]
+        else:
+            timing = self.timing
+        points_transformed = self.odeint(self.net, points, timing, method=self.method, 
+                                         rtol=self.rtol, atol=self.atol)
+        if self.return_waypoints:
+            return points_transformed
+        else:
+            return points_transformed[-1]
 
