@@ -127,20 +127,21 @@ class PDELayer(object):
             y = self.eval(x)
             return y
         else:
-            # split into individual channels and set each to require grad.
-            inputs = [x[..., i:i+1] for i in range(x.shape[-1])]
-            for xx in inputs:
-                if not xx.requires_grad:
-                    xx.requires_grad = True
-            x_ = torch.cat(inputs, axis=-1)
-            y = self.eval(x_)
-            outputs = [y[..., i:i+1] for i in range(y.shape[-1])]
-            inputs_outputs = inputs + outputs
-            residues = {}
-            for key, fn in self.eqns_fn.items():
-                residue = fn(*inputs_outputs)
-                residues.update({key: residue})
-            return y, residues
+            with torch.enable_grad():
+                # split into individual channels and set each to require grad.
+                inputs = [x[..., i:i+1] for i in range(x.shape[-1])]
+                for xx in inputs:
+                    if not xx.requires_grad:
+                        xx.requires_grad = True
+                x_ = torch.cat(inputs, axis=-1)
+                y = self.eval(x_)
+                outputs = [y[..., i:i+1] for i in range(y.shape[-1])]
+                inputs_outputs = inputs + outputs
+                residues = {}
+                for key, fn in self.eqns_fn.items():
+                    residue = fn(*inputs_outputs)
+                    residues.update({key: residue})
+                return y, residues
 
     @property
     def eqn_num(self):

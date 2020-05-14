@@ -21,10 +21,15 @@ def save_checkpoint(state, is_best, epoch, output_folder, filename, logger):
         logger: logger object to log progress.
     """
     if epoch > 1:
-        os.remove(output_folder + filename + '_%03d' % (epoch-1) + '.pth.tar')
+        prev_ckpt = output_folder + filename + '_%03d' % (epoch-1) + '.pth.tar'
+        if os.path.exists(prev_ckpt):
+            os.remove(prev_ckpt)
     torch.save(state, output_folder + filename + '_%03d' % epoch + '.pth.tar')
+    print(output_folder + filename + '_%03d' % epoch + '.pth.tar')
     if is_best:
-        logger.info("Saving new best model")
+        if logger is not None:
+            logger.info("Saving new best model")
+            
         shutil.copyfile(output_folder + filename + '_%03d' % epoch + '.pth.tar',
                         output_folder + filename + '_best.pth.tar')
 
