@@ -69,6 +69,21 @@ def get_k(epoch):
         return 100
     else:
         return 10
+    
+def symmetric_duplication(points, symm_dim=2):
+    """Symmetric duplication of points.
+    
+    Args:
+      points: tensor of shape [batch, npoints, 3]
+      symm_dim: int, direction of symmetry.
+    Returns:
+      duplicated points, tensor of shape [batch, 2*npoints, 3]
+    """
+    points_dup = points.clone()
+    points_dup[..., symm_dim] = -points_dup[..., symm_dim]
+    points_new = torch.cat([points, points_dup], dim=1)
+    
+    return points_new
 
 
 def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch, 
@@ -118,8 +133,13 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
                 epoch_latents += [source_target_latents]
 
             # symmetric pair of matching losses
-            _, _, dist = chamfer_dist(deformed_pts, target_source_points[..., :3])
-
+            if args.symm:
+                _, _, dist = chamfer_dist(deformed_pts, 
+                                          target_source_points[..., :3])
+            else:
+                _, _, dist = chamfer_dist(symmetric_duplication(deformed_pts, symm_dim=2), 
+                                          symmetric_duplication(target_source_points[..., :3], symm_dim=2))
+            
             loss = criterion(dist, torch.zeros_like(dist))
             
             # check amount of deformation
@@ -290,6 +310,11 @@ def get_args():
     parser.add_argument("--sampling_method", type=str, 
                         choices=["nn_replace", "nn_no_replace", "all_replace", "all_no_replace"], 
                         default="nn_no_replace", help="method for sampling pairs of shape to deform.")
+    parser.add_argument("--symm", dest='symm', action='store_true',
+                        help='use symmetric flow.')
+    parser.add_argument("--no_symm", dest='symm', action='store_false',
+                        help='not use symmetric flow.')
+    parser.set_defaults(symm=False)
     args = parser.parse_args()
     return args
 
@@ -377,7 +402,7 @@ def main():
     deformer = NeuralFlowDeformer(latent_size=args.lat_dims, f_width=args.deformer_nf, s_nlayers=2, 
                                   s_width=5, method=args.solver, nonlinearity=args.nonlin, arch='imnet',
                                   adjoint=args.adjoint, rtol=args.rtol, atol=args.atol, via_hub=True,
-                                  no_sign_net=(not args.sign_net))
+                                  no_sign_net=(not args.sign_net),symm_dim=(2 if args.symm else None))
         
     # awkward workaround to get gradients from odeint_adjoint to lat_params
     lat_params = torch.nn.Parameter(torch.randn(fullset.n_shapes, args.lat_dims)*1e-1, requires_grad=True)
