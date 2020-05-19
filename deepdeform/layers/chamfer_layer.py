@@ -3,14 +3,7 @@ import torch
 from torch import nn
 from scipy.spatial import cKDTree
 import multiprocessing
-
-
-REDUCTIONS = {
-    "mean": lambda x: torch.mean(x, axis=-1),
-    "max": lambda x: torch.max(x, axis=-1)[0],
-    "min": lambda x: torch.min(x, axis=-1)[0],
-    "sum": lambda x: torch.sum(x, axis=-1),
-}
+from .shared_definition import *
 
 
 class ChamferDist(nn.Module):

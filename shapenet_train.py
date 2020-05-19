@@ -69,21 +69,6 @@ def get_k(epoch):
         return 100
     else:
         return 10
-    
-def symmetric_duplication(points, symm_dim=2):
-    """Symmetric duplication of points.
-    
-    Args:
-      points: tensor of shape [batch, npoints, 3]
-      symm_dim: int, direction of symmetry.
-    Returns:
-      duplicated points, tensor of shape [batch, 2*npoints, 3]
-    """
-    points_dup = points.clone()
-    points_dup[..., symm_dim] = -points_dup[..., symm_dim]
-    points_new = torch.cat([points, points_dup], dim=1)
-    
-    return points_new
 
 
 def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch, 
@@ -134,11 +119,12 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
 
             # symmetric pair of matching losses
             if args.symm:
+                _, _, dist = chamfer_dist(utils.symmetric_duplication(deformed_pts, symm_dim=2), 
+                                          utils.symmetric_duplication(target_source_points[..., :3], 
+                                                                      symm_dim=2))
+            else:
                 _, _, dist = chamfer_dist(deformed_pts, 
                                           target_source_points[..., :3])
-            else:
-                _, _, dist = chamfer_dist(symmetric_duplication(deformed_pts, symm_dim=2), 
-                                          symmetric_duplication(target_source_points[..., :3], symm_dim=2))
             
             loss = criterion(dist, torch.zeros_like(dist))
             

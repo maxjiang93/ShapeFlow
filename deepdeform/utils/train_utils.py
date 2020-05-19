@@ -124,3 +124,19 @@ def batch_colorize_scalar_tensors(x, vmin=None, vmax=None, cmap='viridis', out_c
         y[idx] = colorize_scalar_tensors(x[idx])
 
     return y
+
+
+def symmetric_duplication(points, symm_dim=2):
+    """Symmetric duplication of points.
+    
+    Args:
+      points: tensor of shape [batch, npoints, 3]
+      symm_dim: int, direction of symmetry.
+    Returns:
+      duplicated points, tensor of shape [batch, 2*npoints, 3]
+    """
+    points_dup = points.clone()
+    points_dup[..., symm_dim] = -points_dup[..., symm_dim]
+    points_new = torch.cat([points, points_dup], dim=1)
+    
+    return points_new

@@ -3,41 +3,8 @@ from torch import nn
 from torchdiffeq import odeint_adjoint
 from torchdiffeq import odeint as odeint_regular
 from .pde_layer import PDELayer
-
+from .shared_definition import *
 import numpy as np
-
-
-class Swish(nn.Module):
-
-    def __init__(self):
-        super(Swish, self).__init__()
-        self.beta = nn.Parameter(torch.tensor(1.0))
-
-    def forward(self, x):
-        return x * torch.sigmoid(self.beta * x)
-
-
-class Lambda(nn.Module):
-
-    def __init__(self, f):
-        super(Lambda, self).__init__()
-        self.f = f
-
-    def forward(self, x):
-        return self.f(x)
-
-
-NONLINEARITIES = {
-    "tanh": nn.Tanh(),
-    "relu": nn.ReLU(),
-    "softplus": nn.Softplus(),
-    "elu": nn.ELU(),
-    "swish": Swish(),
-    "square": Lambda(lambda x: x**2),
-    "identity": Lambda(lambda x: x),
-    "leakyrelu": nn.LeakyReLU(),
-    "tanh10x": Lambda(lambda x: torch.tanh(10*x)),
-}
 
 
 class ImNet(nn.Module):
