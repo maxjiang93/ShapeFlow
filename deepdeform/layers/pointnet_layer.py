@@ -14,51 +14,7 @@ from torch.autograd import Variable
 import numpy as np
 import torch.nn.functional as F
 
-class NoNorm(nn.Module):
-    def __init__(self, layers):
-        super(NoNorm, self).__init__()
-    
-    def forward(self, x):
-        return x
-
-    
-class Lambda(nn.Module):
-
-    def __init__(self, f):
-        super(Lambda, self).__init__()
-        self.f = f
-
-    def forward(self, x):
-        return self.f(x)
-    
-    
-class Swish(nn.Module):
-
-    def __init__(self):
-        super(Swish, self).__init__()
-        self.beta = nn.Parameter(torch.tensor(1.0))
-
-    def forward(self, x):
-        return x * torch.sigmoid(self.beta * x)
-    
-    
-NORMTYPE={
-    "batchnorm": nn.BatchNorm1d,
-    "instancenorm": nn.InstanceNorm1d,
-    "none": NoNorm,
-}
-
-NONLINEARITIES = {
-    "tanh": nn.Tanh(),
-    "relu": nn.ReLU(),
-    "softplus": nn.Softplus(),
-    "elu": nn.ELU(),
-    "swish": Swish(),
-    "square": Lambda(lambda x: x**2),
-    "identity": Lambda(lambda x: x),
-    "leakyrelu": nn.LeakyReLU(),
-    "tanh10x": Lambda(lambda x: torch.tanh(10*x)),
-}
+from .shared_definition import *
 
 
 class STN3d(nn.Module):

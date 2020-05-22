@@ -287,15 +287,20 @@ class FixedPointsCachedDataset(Dataset):
     """Dataset for loading fixed points dataset from cached pickle file.
     """
     
-    def __init__(self, pkl_file):
+    def __init__(self, pkl_file, npts=1024):
         with open(pkl_file, 'rb') as fh:
             self.data_dict = pickle.load(fh)
         self.data_dict = OrderedDict(sorted(self.data_dict.items()))
         self.key_list = list(self.data_dict.keys())
+        assert(npts <= 4096 and npts > 0)
+        self.npts = npts
     
     def __getitem__(self, idx):
         filename = self.key_list[idx]
-        return filename, self.data_dict[filename]
+        points = self.data_dict[filename]
+        rand_seq = np.random.choice(points.shape[0], self.npts, replace=False)
+        points_ = points[rand_seq]
+        return filename, idx, points_
     
     def __len__(self):
         return len(self.data_dict)
