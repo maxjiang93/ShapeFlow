@@ -5,8 +5,9 @@ import os
 import sys
 WORKING_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 sys.path.append(WORKING_DIR)
-from utils.render import render_mesh
+from utils.render import render_trimesh
 from multiprocessing import Pool
+import trimesh
 import scipy.misc
 import tqdm
 import argparse
@@ -18,7 +19,11 @@ def render_file(in_file):
     out_file = in_file.replace(input_root, output_root)
     out_dir = os.path.dirname(out_file)
     os.makedirs(out_dir, exist_ok=True)
-    image, _ = render_mesh(in_file, dist=1.2, res=(112, 112), color=[0.,1.,0.], intensity=6)
+    eye = [.8, .4, -.5]
+    center = [0, 0, 0]
+    up = [0, 1, 0]
+    mesh = trimesh.load(in_file)
+    image, _, _, _ = render_trimesh(mesh, eye, center, up, res=(112, 112), light_intensity=6)
     imageio.imwrite(os.path.join(out_dir, 'thumbnail.jpg'), image)
 
 
@@ -50,6 +55,7 @@ def get_args():
 def main():
     args = get_args()
     in_files = glob.glob(os.path.join(WORKING_DIR, args.input_root, args.file_pattern), recursive=True)
+    print(os.path.join(WORKING_DIR, args.input_root, args.file_pattern))
     global input_root
     global output_root
     global pbar

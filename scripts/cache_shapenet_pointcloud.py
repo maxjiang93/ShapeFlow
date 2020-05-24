@@ -40,7 +40,7 @@ def get_args():
     
     parser.add_argument("--file_pattern", type=str, default="**/*.ply",
                         help="filename pattern for files to be rendered.")
-    parser.add_argument("--input_root",  type=str, default="data/shapenet_watertight",
+    parser.add_argument("--input_root",  type=str, default="data/shapenet_simplified",
                         help="path to input mesh root.")
     parser.add_argument("--output_pkl", type=str, default="data/shapenet_points.pkl",
                         help="path to output image root.")
