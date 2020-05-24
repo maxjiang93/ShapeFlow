@@ -1,14 +1,21 @@
+import numpy as np
 from scipy.spatial import cKDTree
+import time
+import torch
+from torch.utils.data import SubsetRandomSampler, DataLoader
+
 from deepdeform.layers.chamfer_layer import ChamferDistKDTree
-from torch.utils.data import SubsetRandomSampler
-from .shared_definition import *
+from deepdeform.layers.shared_definition import *
+import deepdeform.utils.train_utils as utils
+
+from shapenet_dataloader import ShapeNetMesh, FixedPointsCachedDataset
 
 
 class LatentEmbedder(object):
     """Helper class for embedding new observation in deformation latent space.
     """
     
-    def __init__(self, point_dataset, mesh_dataset, deformer):
+    def __init__(self, point_dataset, mesh_dataset, deformer, topk=5):
         """Initialize embedder.
         
         Args:
@@ -19,7 +26,7 @@ class LatentEmbedder(object):
         self.point_dataset = point_dataset
         self.mesh_dataset = mesh_dataset
         self.deformer = deformer
-                    
+        self.topk = topk
         self.tree = cKDTree(self.lat_params.clone().detach().cpu().numpy())
             
     @property
@@ -54,8 +61,8 @@ class LatentEmbedder(object):
         return meshes
                 
     def embed(self, input_points, optimizer='adam', lr=1e-3, seed=0,
-              niter=20, bs=32, verbose=False, matching="one_way", loss_type='l1',
-              topk_finetune=10):
+              embedding_niter=30, finetune_niter=30, bs=32, verbose=False, 
+              matching="two_way", loss_type='l1'):
         """Embed inputs points observations into deformation latent space.
         
         Args: 
@@ -63,12 +70,12 @@ class LatentEmbedder(object):
           optimizer: str, optimizer choice. one of sgd, adam, adadelta, adagrad, rmsprop.
           lr: float, learning rate.
           seed: int, random seed.
-          niter: int, number of optimization iterations.
+          embedding_niter: int, number of embedding optimization iterations.
+          finetune_niter: int, number of finetuning optimization iterations.
           bs: int, batch size.
           verbose: bool, turn on verbose.
           matching: str, matching function. choice of one_way or two_way.
           loss_type: str, loss type. choice of l1, l2, huber.
-          topk_finetune: int, topk nearest neighbor to finetune.
         
         Returns:
           embedded_latents: tensor of shape [batch, lat_dims]
@@ -111,9 +118,9 @@ class LatentEmbedder(object):
         chamfer_dist = ChamferDistKDTree(reduction='mean', njobs=1)
         chamfer_dist.to(self.device)
 
-        def optimize_latent(point_loader, niter):
+        def optimize_latent(point_loader, optim, niter):
             # optimize for latents
-            deformer.train()
+            self.deformer.train()
             toc = time.time()
             
             bs_src = point_loader.batch_size
@@ -123,12 +130,13 @@ class LatentEmbedder(object):
             # broadcast and reshape input points
             target_points_ = (input_points[None]
                               .expand(bs_src, bs_tar, npts_tar, 3).view(-1, npts_tar, 3))
+            it = 0
             
             for batch_idx, (fnames, idxs, source_points) in enumerate(point_loader):
                 tic = time.time()
                 # send tensors to device
-                source_points = source_points.to(device)  # [bs_src, npts_src, 3]
-                idxs = idxs.to(device)
+                source_points = source_points.to(self.device)  # [bs_src, npts_src, 3]
+                idxs = idxs.to(self.device)
 
                 optim.zero_grad()
 
@@ -145,8 +153,8 @@ class LatentEmbedder(object):
                 source_points_ = (source_points[:, None]
                                   .expand(bs_src, bs_tar, npts_src, 3).view(-1, npts_src, 3))
 
-                deformed_pts = deformer(source_points,   # [bs_sr*bs_tar, npts_src, 3]
-                                        source_target_latents)  # [bs_sr*bs_tar, npts_src, 3]
+                deformed_pts = self.deformer(source_points,   # [bs_sr*bs_tar, npts_src, 3]
+                                             source_target_latents)  # [bs_sr*bs_tar, npts_src, 3]
 
                 # symmetric pair of matching losses
                 if self.symm:
@@ -180,15 +188,18 @@ class LatentEmbedder(object):
                         dist = loss.item()
                     else:
                         dist = np.sqrt(loss.item())
-                    print(f"Loss: {loss.item():.4f}, Dist: {dist:.4f}, Deformation Magnitude: {deform_abs.item():.4f}, Time per iter (s): {toc-tic:.4f}")
+                    print(f"Iter: {it}, Loss: {loss.item():.4f}, Dist: {dist:.4f}, "
+                          f"Deformation Magnitude: {deform_abs.item():.4f}, Time per iter (s): {toc-tic:.4f}")
+                    it += 1
                 if batch_idx >= niter:
                     break
                     
         # optimize to range
-        optimize_latent(point_loader, niter)
+        optimize_latent(point_loader, optim, embedding_niter)
+        latents_pre_tune = embedded_latents.detach().cpu().numpy()
                 
         # finetune topk
-        dist, idxs = self.tree.query(embedded_latents.detach().cpu().numpy(), k=topk_finetune)  # [batch, k]
+        dist, idxs = self.tree.query(embedded_latents.detach().cpu().numpy(), k=self.topk)  # [batch, k]
         bs, k = idxs.shape
         idxs_ = idxs.reshape(-1)
         
@@ -196,15 +207,18 @@ class LatentEmbedder(object):
         for param_group in optim.param_groups:
             param_group['lr'] = 1e-3
         
-        sampler = SubsetRandomSampler(idxs_.tolist()*10)
-        point_loader = DataLoader(self.point_dataset, batch_size=topk_finetune, sampler=sampler,
+        sampler = SubsetRandomSampler(idxs_.tolist()*finetune_niter)
+        point_loader = DataLoader(self.point_dataset, batch_size=self.topk, sampler=sampler,
                                   shuffle=False, drop_last=True)
-        print("Finetuning for 10 iters...")
-        optimize_latent(point_loader, 10)
         
-        return embedded_latents.detach().cpu().numpy()
+        print(f"Finetuning for {finetune_niter} iters...")
+        optim = OPTIMIZERS[optimizer]([embedded_latents]+list(self.deformer.parameters()), lr=1e-3)
+        optimize_latent(point_loader, optim, finetune_niter)
+        latents_post_tune = embedded_latents.detach().cpu().numpy()
+        
+        return latents_pre_tune, latents_post_tune
     
-    def retrieve(self, lat_codes, tar_pts, topk=10, matching="one_way"):
+    def retrieve(self, lat_codes, tar_pts, matching="one_way"):
         """Retrieve top 10 nearest neighbors, deform and pick the best one.
         
         Args: 
@@ -215,7 +229,7 @@ class LatentEmbedder(object):
         """
         if lat_codes.shape[0] != 1:
             raise NotImplementedError("Code is not ready for batch size > 1.")
-        dist, idxs = self.tree.query(lat_codes, k=topk)  # [batch, k]
+        dist, idxs = self.tree.query(lat_codes, k=self.topk)  # [batch, k]
         bs, k = idxs.shape
         idxs_ = idxs.reshape(-1)
         
@@ -234,7 +248,7 @@ class LatentEmbedder(object):
         src_verts, faces, nv = self._padded_verts_from_meshes(orig_meshes)
         src_verts = torch.tensor(src_verts).to(self.device)
         with torch.no_grad():
-            deformed_verts = deformer(src_verts, src_tar_latent)
+            deformed_verts = self.deformer(src_verts, src_tar_latent)
         deformed_meshes = self._meshes_from_padded_verts(deformed_verts, faces, nv)
         
         # chamfer distance calc
