@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH -o .slurm_logs/run_4746_nnnr_nosign.out
+#SBATCH -o .slurm_logs/symm_lat128_nosign_b32.out
 #SBATCH -C gpu
-#SBATCH -t 240
+#SBATCH -t 480
 #SBATCH -c 80
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=1
@@ -16,7 +16,7 @@ mkdir -p logs
 # # move data to SSD
 # cp -r data /tmp
 
-run_name=run_4746_nnnr_nosign
+run_name=symm_lat128_nosign_b32
 log_dir=runs/$run_name
 data_root=data/shapenet_simplified
 
@@ -31,7 +31,7 @@ srun python shapenet_train.py \
 --log_dir=$log_dir \
 --lr_scheduler \
 --visualize_mesh \
---batch_size_per_gpu=128 \
+--batch_size_per_gpu=32 \
 --log_interval=2 \
 --epochs=100 \
 --no_sign_net \
@@ -39,6 +39,8 @@ srun python shapenet_train.py \
 --solver='dopri5' \
 --deformer_nf=128 \
 --nsamples=512 \
---lat_dims=512 \
+--lat_dims=128 \
 --nonlin='leakyrelu' \
+--symm \
 --sampling_method='all_no_replace' \
+# --resume='runs/symm_lat256_nosign_b32/checkpoint_latest.pth.tar_deepdeform_051.pth.tar'

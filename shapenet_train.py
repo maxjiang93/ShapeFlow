@@ -249,7 +249,7 @@ def get_args():
     parser.add_argument("--data_root", type=str, default="data/shapenet_simplified",
                         help="path to mesh folder root (default: data/shapenet_simplified)")
     parser.add_argument("--category", type=str, default="chair",
-                        help="shape category.")
+                        help="the shape category.") 
     parser.add_argument("--thumbnails_root", type=str, default="data/shapenet_thumbnails",
                         help="path to thumbnails folder root (default: data/shapenet_thumbnails)")
     parser.add_argument("--deformer_arch", type=str, choices=["imnet", "vanilla"], default="imnet",
@@ -374,7 +374,7 @@ def main():
 
     if args.vis_mesh:
         # for loading full meshes for visualization
-        simp_data_root = args.data_root.replace('shapenet_watertight', 'shapenet_simplified')
+        simp_data_root = args.data_root
         simpset = dl.ShapeNetMesh(data_root=simp_data_root, split="train", category=args.category, 
                                   normals=False)
         if args.datasubset > 0: simpset.restrict_subset(args.datasubset)

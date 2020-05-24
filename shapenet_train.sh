@@ -1,6 +1,6 @@
 #!/bin/bash
 
-run_name=symm_lat256_nosign_b32
+run_name=debug_car_symm_lat128_nosign_b32
 log_dir=runs/$run_name
 data_root=data/shapenet_simplified
 
@@ -27,9 +27,10 @@ srun python shapenet_train.py \
 --solver='dopri5' \
 --deformer_nf=128 \
 --nsamples=512 \
---lat_dims=256 \
+--lat_dims=128 \
 --nonlin='leakyrelu' \
 --symm \
+--category='car' \
 --sampling_method='all_no_replace' \
 # --resume='runs/run_hub_spoke_all_chair/checkpoint_latest.pth.tar_deepdeform_085.pth.tar'
 

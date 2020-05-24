@@ -206,7 +206,7 @@ class ShapeNetVertex(ShapeNetBase):
         if self.thumbnails:
             thumb_dir = self.files[idx].replace(self.data_root, self.thumbnails_dir)
             thumb_dir = os.path.dirname(thumb_dir)
-            thumb_file = os.path.join(thumb_dir, "thumbnail.png")
+            thumb_file = os.path.join(thumb_dir, "thumbnail.jpg")
             thumb = np.array(imageio.imread(thumb_file))
             return verts, thumb
         else:
