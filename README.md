@@ -85,4 +85,4 @@ year={2020},
 ```
 
 ### Contact
-Please contact [Max Jiang](mailto:maxjiang93@gmail.com) or [Jingwei Huang](mailto:hjwdzh@gmail.com) if you have further questions!
+Please contact [Max Jiang](mailto:maxjiang93@gmail.com) if you have further questions!
