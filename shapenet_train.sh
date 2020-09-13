@@ -1,15 +1,17 @@
 #!/bin/bash
 
-run_name=debug_car_symm_lat128_nosign_b32
+#####################################
+#       Configure Experiment        #
+#####################################
+run_name=demo
 log_dir=runs/$run_name
 data_root=data/shapenet_simplified
 
-module load pytorch/v1.4.0-gpu
+# Create run directory if it doesn't exist.
 mkdir -p runs
 
-# export CUDA_VISIBLE_DEVICES=0
-
-srun python shapenet_train.py \
+# Launch training.
+python shapenet_train.py \
 --atol=1e-4 \
 --rtol=1e-4 \
 --data_root=$data_root \
@@ -31,6 +33,4 @@ srun python shapenet_train.py \
 --nonlin='leakyrelu' \
 --symm \
 --category='car' \
---sampling_method='all_no_replace' \
-# --resume='runs/run_hub_spoke_all_chair/checkpoint_latest.pth.tar_deepdeform_085.pth.tar'
-
+--sampling_method='all_no_replace'
