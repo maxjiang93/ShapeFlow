@@ -1,5 +1,9 @@
+"""Script for performing mesh simplification.
+"""
+# flake8: noqa E402
 import sys
-sys.path.append('..')
+
+sys.path.append("..")
 
 import meshutils
 import trimesh

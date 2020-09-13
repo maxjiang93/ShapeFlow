@@ -5,8 +5,9 @@ from sympy.parsing.sympy_parser import parse_expr
 
 
 # utility functions for parsing equations
-torch_diff = lambda y, x: grad(y, x, grad_outputs=torch.ones_like(y), create_graph=True,
-                               allow_unused=True)[0]
+torch_diff = lambda y, x: grad(  # noqa: E731
+    y, x, grad_outputs=torch.ones_like(y), create_graph=True, allow_unused=True
+)[0]
 
 
 class PDELayer(object):
@@ -23,8 +24,10 @@ class PDELayer(object):
         """
         self.in_vars = sympy.symbols(in_vars)
         self.out_vars = sympy.symbols(out_vars)
-        if not isinstance(self.in_vars, tuple): self.in_vars = (self.in_vars,)
-        if not isinstance(self.out_vars, tuple): self.out_vars = (self.out_vars,)
+        if not isinstance(self.in_vars, tuple):
+            self.in_vars = (self.in_vars,)
+        if not isinstance(self.out_vars, tuple):
+            self.out_vars = (self.out_vars,)
         self.n_in = len(self.in_vars)
         self.n_out = len(self.out_vars)
         self.all_vars = list(self.in_vars) + list(self.out_vars)
@@ -32,38 +35,45 @@ class PDELayer(object):
         self.eqns_fn = {}  # lambda function for the equations
         self.forward_method = None
 
-
-    def add_equation(self, eqn_str, eqn_name='', subs_dict=None):
+    def add_equation(self, eqn_str, eqn_name="", subs_dict=None):
         """Add an equation to the physics layer.
 
-        The equation string should represent the expression for computing the residue of a given
-        equation, rather than representing the equation itself. Use dif(y,x) for computing the
-        derivate of y with respect to x. Sign of the expression does not matter. The variable names
-        **MUST** be the same as the variables in self.in_vars and self.out_vars.
+        The equation string should represent the expression for computing the
+        residue of a given equation, rather than representing the equation
+        itself. Use dif(y,x) for computing the derivate of y with respect to x.
+        Sign of the expression does not matter. The variable names
+        **MUST** be the same as the variables in self.in_vars and
+        self.out_vars.
 
         E.g.,
-        For the equation partial(u, x) + partial(v, y) = 3*partial(u, y)*partial(v, x), write as:
+        For the equation
+        partial(u, x) + partial(v, y) = 3*partial(u, y)*partial(v, x),
+        write as:
         eqn_str = 'dif(u,x)+dif(v,y)-3*dif(u,y)*dif(v,x)'
         - or -
         eqn_str = '3*dif(u,y)*dif(v,x)-(dif(u,x)+dif(v,y))'
 
         Args:
-          eqn_str: str, a string that can be parsed as an experession for computing the residue of
-          an equation.
-          eqn_name: str, a name or identifier for this equation entry. E.g., 'div_free'. If none or
-          empty, use default of eqn_i where i is an index.
-          subs_dict: dict, a dictionary where the key (str) is the variable to subsitute and val
-          (str) is the expression to substitite the variable with. useful for scenarios such as
-          normalizations and/or non-dimensionalizing expressions.
+          eqn_str: str, a string that can be parsed as an experession for
+            computing the residue of an equation.
+          eqn_name: str, a name or identifier for this equation entry. E.g.,
+            'div_free'. If none or empty, use default of eqn_i where i is an
+            index.
+          subs_dict: dict, a dictionary where the key (str) is the variable
+            to subsitute and val (str) is the expression to substitite the =
+            variable with. useful for scenarios such as normalizations and/or
+            non-dimensionalizing expressions.
 
         Raises:
-          ValueError: when the variables in the eqn_str do not match that of in_vars and out_vars.
+          ValueError: when the variables in the eqn_str do not match that of
+            in_vars and out_vars.
 
         """
         if not eqn_name:
-            eqn_name = 'eqn_{i}'.format(len(self.eqns_raw.keys()))
+            eqn_name = "eqn_{i}".format(i=len(self.eqns_raw.keys()))
 
-        # assert that the equation contains the same vars as in_vars and out_vars
+        # Assert that the equation contains the same vars as in_vars and
+        # out_vars.
         expr = parse_expr(eqn_str)
 
         # substitute variables in the equation.
@@ -71,15 +81,19 @@ class PDELayer(object):
             for key, val in subs_dict.items():
                 expr = expr.subs(key, val)
 
-        valid_var = expr.free_symbols <= (set(self.in_vars)|set(self.out_vars))
+        valid_var = expr.free_symbols <= (
+            set(self.in_vars) | set(self.out_vars)
+        )
         if not valid_var:
-            raise ValueError('Variables in the eqn_str ({}) does not match that of '
-                             'in_vars ({}) and out_vars ({})'.format(expr.free_symbols,
-                                                                     set(self.in_vars),
-                                                                     set(self.out_vars)))
+            raise ValueError(
+                "Variables in the eqn_str ({}) does not match that of "
+                "in_vars ({}) and out_vars ({})".format(
+                    expr.free_symbols, set(self.in_vars), set(self.out_vars)
+                )
+            )
 
         # convert into lambda functions
-        fn = sympy.lambdify(self.all_vars, expr, {'dif': torch_diff})
+        fn = sympy.lambdify(self.all_vars, expr, {"dif": torch_diff})
 
         # update equations
         self.eqns_raw.update({eqn_name: eqn_str})
@@ -89,8 +103,8 @@ class PDELayer(object):
         """Update forward method.
 
         Args:
-          forward_method: a function, such that y = forward_method(x). x is a tensor of
-          shape (..., n_in) and y is a tensor of shape (..., n_out).
+          forward_method: a function, such that y = forward_method(x). x is a
+          tensor of shape (..., n_in) and y is a tensor of shape (..., n_out).
         """
         self.forward_method = forward_method
 
@@ -103,24 +117,32 @@ class PDELayer(object):
           a tensor of shape (..., n_out)
         """
         if not self.forward_method:
-            raise RuntimeError('forward_method has not been defined.'
-                               'Run update_forward_method first.')
+            raise RuntimeError(
+                "forward_method has not been defined."
+                "Run update_forward_method first."
+            )
         y = self.forward_method(x)
         if not ((x.shape[-1] == self.n_in) and (y.shape[-1] == self.n_out)):
-            raise ValueError('Input/output dimensions ({}/{}) not equal to the dimensions of '
-                             'defined variables ({}/{}).'.format(x.shape[-1], y.shape[-1],
-                                                                 self.n_in, self.n_out))
+            raise ValueError(
+                "Input/output dimensions ({}/{}) not equal to the dimensions "
+                "of defined variables ({}/{}).".format(
+                    x.shape[-1], y.shape[-1], self.n_in, self.n_out
+                )
+            )
         return y
 
     def __call__(self, x, return_residue=True):
-        """Compute the forward eval and possibly compute residues from the previously defined pdes.
+        """Compute the forward eval and possibly compute residues from the
+        previously defined pdes.
 
         Args:
           x: input tensor of shape (..., n_in)
-          return_residue: bool, whether to return the residue of the pde for each equation.
+          return_residue: bool, whether to return the residue of the pde for
+            each equation.
         Returns:
           y: output tensor of shape (..., n_out)
-          residues (optional): a dictionary containing residue evaluation for each pde.
+            residues (optional): a dictionary containing residue evaluation for
+            each pde.
         """
 
         if not return_residue:
@@ -129,13 +151,13 @@ class PDELayer(object):
         else:
             with torch.enable_grad():
                 # split into individual channels and set each to require grad.
-                inputs = [x[..., i:i+1] for i in range(x.shape[-1])]
+                inputs = [x[..., i: i + 1] for i in range(x.shape[-1])]
                 for xx in inputs:
                     if not xx.requires_grad:
                         xx.requires_grad = True
                 x_ = torch.cat(inputs, axis=-1)
                 y = self.eval(x_)
-                outputs = [y[..., i:i+1] for i in range(y.shape[-1])]
+                outputs = [y[..., i: i + 1] for i in range(y.shape[-1])]
                 inputs_outputs = inputs + outputs
                 residues = {}
                 for key, fn in self.eqns_fn.items():
