@@ -5,10 +5,10 @@ By: [Chiyu "Max" Jiang](http://maxjiang.ml/), [Jingwei Huang](http://stanford.ed
 
 \[[Project Website]()\] \[[Paper]()\]
  
-![teaser](doc/teaser.png "deepdeform_teaser")
+![teaser](doc/teaser.png "shapeflow_teaser")
 
 ### Introduction
-We present DeepDeform, a continuous flow model that allows the learning of a deformation space between geometries. We propose a novel flow-based learnable deformation framework for arbitary geometry pairs that is pairwise bijective, allowing a fast and high quality between objects. Furthermore, end-to-end training with a geometry encoder such as PointNet allows us to efficiently learn a deformation-aware shape embedding where the Euclidean distance between shapes in the embedding space directly correlates with the geometric differences between shapes. Such a learned deformation space allows us to perform "reconstruction via deformation", where we can seamlessly retrieve and deform geometries in a training set to match observations, that produces significantly better quality than comparable methods, and orders of magnitude faster.
+We present ShapeFlow, a flow-based model for learning a deformation space for entire classes of 3D shapes with large intra-class variations. ShapeFlow allows learning a multi-template deformation space that is agnostic to shape topology, yet preserves fine geometric details. Different from a generative space where a latent vector is directly decoded into a shape, a deformation space decodes a vector into a continuous flow that can advect a source shape towards a target. Such a space naturally allows the disentanglement of geometric style (coming from the source) and structural pose (conforming to the target). We parametrize the deformation between geometries as a learned continuous flow field via a neural network and show that such deformations can be guaranteed to have desirable properties, such as be bijectivity, freedom from self-intersections, or volume preservation. We illustrate the effectiveness of this learned deformation space for various downstream applications, including shape generation via deformation, geometric style transfer, unsupervised learning of a consistent parameterization for entire classes of shapes, and shape interpolation.
 
 ### Installing dependencies
 We recommend using pip to install all required dependencies with ease.
@@ -75,12 +75,11 @@ Tensorboard allows tracking of deformation losses, as well as visualizing the so
 ### Citation
 If you find our code useful for your work, please consider citing our paper:
 ```
-@inproceedings{
-acoolpaper,
-title={To be submitted},
-author={Chiyu Max Jiang and Jingwei Huang and Andrea Tagliasacci and Leonidas Guibas},
-booktitle={Maybe Neural Information Processing Systems 2020},
-year={2020},
+@article{jiang2020shapeflow,
+  title={ShapeFlow: Learnable Deformations Among 3D Shapes},
+  author={Jiang, Chiyu and Huang, Jingwei and Tagliasacchi, Andrea and Guibas, Leonidas},
+  journal={arXiv preprint arXiv:2006.07982},
+  year={2020}
 }
 ```
 
