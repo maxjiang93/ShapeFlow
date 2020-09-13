@@ -11,7 +11,7 @@ import time
 from types import SimpleNamespace
 
 from shapenet_dataloader import ShapeNetMesh, FixedPointsCachedDataset
-from deepdeform.layers.deformation_layer import NeuralFlowDeformer
+from shapeflow.layers.deformation_layer import NeuralFlowDeformer
 from shapenet_embedding import LatentEmbedder
 
 

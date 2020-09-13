@@ -4,9 +4,9 @@ import time
 import torch
 from torch.utils.data import SubsetRandomSampler, DataLoader
 
-from deepdeform.layers.chamfer_layer import ChamferDistKDTree
-from deepdeform.layers.shared_definition import LOSSES, OPTIMIZERS
-import deepdeform.utils.train_utils as utils
+from shapeflow.layers.chamfer_layer import ChamferDistKDTree
+from shapeflow.layers.shared_definition import LOSSES, OPTIMIZERS
+import shapeflow.utils.train_utils as utils
 
 
 class LatentEmbedder(object):

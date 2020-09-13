@@ -8,9 +8,9 @@ import numpy as np
 import time
 import trimesh
 
-import deepdeform.utils.train_utils as utils
-from deepdeform.layers.chamfer_layer import ChamferDistKDTree
-from deepdeform.layers.deformation_layer import NeuralFlowDeformer
+import shapeflow.utils.train_utils as utils
+from shapeflow.layers.chamfer_layer import ChamferDistKDTree
+from shapeflow.layers.deformation_layer import NeuralFlowDeformer
 import shapenet_dataloader as dl
 
 import torch
@@ -765,7 +765,7 @@ def main():
         f"{model_param_count(deformer)}(deformer) paramerters in total"
     )
 
-    checkpoint_path = os.path.join(args.log_dir, "checkpoint_latest.pth.tar")
+    checkpoint_path = os.path.join(args.log_dir, "checkpoint_latest")
 
     if args.lr_scheduler:
         scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, "min")
@@ -834,7 +834,7 @@ def main():
             is_best,
             epoch,
             checkpoint_path,
-            "_deepdeform",
+            "_shapeflow",
             logger,
         )
 

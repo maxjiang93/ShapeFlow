@@ -42,5 +42,4 @@ srun python shapenet_train.py \
 --lat_dims=128 \
 --nonlin='leakyrelu' \
 --symm \
---sampling_method='all_no_replace' \
-# --resume='runs/symm_lat256_nosign_b32/checkpoint_latest.pth.tar_deepdeform_051.pth.tar'
+--sampling_method='all_no_replace'

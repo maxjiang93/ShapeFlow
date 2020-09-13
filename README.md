@@ -62,7 +62,7 @@ To monitor the training process using tensorboard, do:
 ssh my_favorite_machine -L 6006:localhost:6006
 
 # go to the directory containing the tensorboard log
-cd path/to/DeepDeform/runs/<job_name>/tensorboard
+cd path/to/ShapeFlow/runs/<job_name>/tensorboard
 
 # launch tensorboard
 tensorboard --logdir . --port 6006

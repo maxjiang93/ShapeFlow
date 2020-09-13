@@ -8,9 +8,9 @@ import numpy as np
 import time
 import trimesh
 
-import deepdeform.utils.train_utils as utils
-from deepdeform.layers.chamfer_layer import ChamferDistKDTree
-from deepdeform.layers.deformation_layer import NeuralFlowDeformer
+import shapeflow.utils.train_utils as utils
+from shapeflow.layers.chamfer_layer import ChamferDistKDTree
+from shapeflow.layers.deformation_layer import NeuralFlowDeformer
 import shapenet_dataloader as dl
 
 import torch
@@ -834,7 +834,7 @@ def main():
             is_best,
             epoch,
             checkpoint_path,
-            "_deepdeform",
+            "_shapeflow",
             logger,
         )
 

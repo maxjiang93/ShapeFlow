@@ -1,8 +1,8 @@
 import torch.optim as optim
 
-from deepdeform.layers.chamfer_layer import ChamferDistKDTree
-from deepdeform.layers.deformation_layer import NeuralFlowDeformer
-from deepdeform.layers.pointnet_layer import PointNetEncoder
+from shapeflow.layers.chamfer_layer import ChamferDistKDTree
+from shapeflow.layers.deformation_layer import NeuralFlowDeformer
+from shapeflow.layers.pointnet_layer import PointNetEncoder
 
 import torch
 import numpy as np
