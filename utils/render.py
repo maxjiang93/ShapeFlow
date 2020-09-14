@@ -15,6 +15,7 @@ def render_trimesh(
     world_up,
     res=(640, 640),
     light_intensity=3.0,
+    ambient_intensity=None,
     **kwargs,
 ):
     """Render a shapenet mesh using default settings.
@@ -32,6 +33,7 @@ def render_trimesh(
       res: 2-tuple of int, [width, height], resolution (in pixels) of output
         images.
       light_intensity: float, light intensity.
+      ambient_intensity: float, ambient light intensity.
       kwargs: additional flags to pass to pyrender renderer.
     Returns:
       color_img: [*res, 3] color image.
@@ -46,7 +48,9 @@ def render_trimesh(
     world_up = list2npy(world_up).astype(np.float32)
 
     # setup camera pose matrix
-    scene = pyrender.Scene()
+    scene = pyrender.Scene(
+        ambient_light=ambient_intensity*np.ones([3], dtype=float)
+    )
     for tmesh in trimesh_mesh:
         if not (
             isinstance(tmesh, trimesh.Trimesh)
