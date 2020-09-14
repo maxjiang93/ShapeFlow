@@ -127,3 +127,9 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Meshes
+*.ply
+
+# VSCode
+.vscode
