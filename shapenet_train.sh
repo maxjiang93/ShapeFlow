@@ -1,15 +1,19 @@
 #!/bin/bash
 
-run_name=debug_car_symm_lat128_nosign_b32
-log_dir=runs/$run_name
+# DEFINE TRAINING
+basename="shapeflow"
+category="car"  # one of car/airplane/chair (tested), or other shapenet categories.
+run_dir="runs"  # run directory
+
+run_name=${basename}_${category}
+log_dir=${run_dir}/$run_name
 data_root=data/shapenet_simplified
 
-module load pytorch/v1.4.0-gpu
-mkdir -p runs
+mkdir -p ${run_dir}
 
-# export CUDA_VISIBLE_DEVICES=0
+# export CUDA_VISIBLE_DEVICES=0,1
 
-srun python shapenet_train.py \
+python shapenet_train.py \
 --atol=1e-4 \
 --rtol=1e-4 \
 --data_root=$data_root \
@@ -30,7 +34,5 @@ srun python shapenet_train.py \
 --lat_dims=128 \
 --nonlin='leakyrelu' \
 --symm \
---category='car' \
+--category=${category} \
 --sampling_method='all_no_replace' \
-# --resume='runs/run_hub_spoke_all_chair/checkpoint_latest.pth.tar_deepdeform_085.pth.tar'
-

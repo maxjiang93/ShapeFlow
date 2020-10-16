@@ -66,6 +66,7 @@ class ShapeNetBase(Dataset):
                 raise ValueError(f"{c} is not in the list of the 13 categories: {cats}")
         self.files = self._get_filenames(self.data_root, self.split, self.categories)
         self._file_splits= None
+        self.fnames = ['/'.join(f.split('/')[-4:-1]) for f in self.files]
         
         self.thumbnails_dir = None
         self.thumbnails = False
@@ -125,8 +126,8 @@ class ShapeNetBase(Dataset):
         """A dict mapping unique mesh names to indicies.
         """
         if self._fname_to_idx_dict is None:
-            fnames = ['/'.join(f.split('/')[-4:-1]) for f in self.files]
-            self._fname_to_idx_dict = dict(zip(fnames, list(range(len(fnames)))))
+            self._fname_to_idx_dict = dict(zip(self.fnames, 
+                                               list(range(len(self.fnames)))))
         return self._fname_to_idx_dict
     
     def idx_to_combinations(self, idx):

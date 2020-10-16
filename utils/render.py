@@ -6,11 +6,12 @@ import pyrender
 import glob
 
 
-def render_trimesh(trimesh_mesh, eye, center, world_up, res=(640, 640), light_intensity=3.0, **kwargs):
+def render_trimesh(trimesh_mesh, eye, center, world_up, res=(640, 640), light_intensity=3.0, ambient_intensity=0.2, bg_color=[1., 1., 1., 1.], **kwargs):
     """Render a shapenet mesh using default settings.
     
     Args:
-      trimesh_mesh: trimesh mesh instance, or a list of trimesh meshes (or point clouds).
+      trimesh_mesh: trimesh mesh instance, or a list of trimesh meshes (or point clouds)
+          or pyrender Mesh instances.
       eye: array with shape [3,] containing the XYZ world
           space position of the camera.
       center: array with shape [3,] containing a position
@@ -34,19 +35,21 @@ def render_trimesh(trimesh_mesh, eye, center, world_up, res=(640, 640), light_in
     world_up = list2npy(world_up).astype(np.float32)
     
     # setup camera pose matrix
-    scene = pyrender.Scene()
+    scene = pyrender.Scene(ambient_light=np.array([1., 1., 1.])*ambient_intensity, bg_color=bg_color)
     for tmesh in trimesh_mesh:
-        if not (isinstance(tmesh, trimesh.Trimesh) or isinstance(tmesh, trimesh.PointCloud)):
-            raise NotImplementedError("All instances in trimesh_mesh must be either trimesh.Trimesh or "
-                                      f"trimesh.PointCloud. Instead it is {type(tmesh)}.")
+        if not isinstance(tmesh, (trimesh.Trimesh, trimesh.PointCloud, pyrender.mesh.Mesh)):
+            raise NotImplementedError("All instances in trimesh_mesh must be either trimesh.Trimesh, "
+                                      f"trimesh.PointCloud or pyrender.mesh.Mesh. Instead it is {type(tmesh)}.")
         if isinstance(tmesh, trimesh.Trimesh):
             mesh = pyrender.Mesh.from_trimesh(tmesh)
-        else:
+        elif isinstance(tmesh, trimesh.PointCloud):
             if tmesh.colors is not None:
                 colors = np.array(tmesh.colors)
             else:
                 colors = np.ones_like(tmesh.vertices)
             mesh = pyrender.Mesh.from_points(np.array(tmesh.vertices), colors=colors)
+        else:
+            mesh = tmesh
         scene.add(mesh)
     
     # Set up the camera -- z-axis away from the scene, x-axis right, y-axis up
@@ -99,6 +102,25 @@ def _points_from_depth(depth_img, zoffset=0):
     depth = depth_img.reshape(-1)[point_mask_flat]+zoffset
     point_img = np.concatenate([point_img, depth[..., None]], axis=-1)
     return point_img
+
+
+def line_meshes(verts, edges, colors=None, poses=None):
+    """Create pyrender Mesh instance for lines.
+    
+    Args:
+      verts: np.array floats of shape [#v, 3]
+      edges: np.array ints of shape [#e, 3]
+      colors: np.array floats of shape [#v, 3]
+      poses: poses : (x,4,4)
+             Array of 4x4 transformation matrices for instancing this object.
+    """
+    prim = pyrender.primitive.Primitive(
+        positions=verts,
+        indices=edges,
+        color_0=colors,
+        mode=pyrender.constants.GLTF.LINES,
+        poses=poses)
+    return pyrender.mesh.Mesh(primitives=[prim], is_visible=True)
 
 
 def unproject_depth_img(depth_img, projection_matrix, world_to_cam):

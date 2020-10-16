@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # CONFIG
-category=03001627
-ckpt=runs/pretrained_chair_symm128/checkpoint_latest.pth.tar_deepdeform_100.pth.tar
+category=02691156
+ckpt=runs/pretrained_airplane_symm128/checkpoint_latest.pth.tar_deepdeform_200.pth.tar
 
 gpuid=$1  # gpu id
 sid=$2  # start id
