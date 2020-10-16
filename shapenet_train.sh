@@ -1,18 +1,16 @@
 #!/bin/bash
 
-# DEFINE TRAINING
-basename="shapeflow"
-category="car"  # one of car/airplane/chair (tested), or other shapenet categories.
-run_dir="runs"  # run directory
-
-run_name=${basename}_${category}
-log_dir=${run_dir}/$run_name
+#####################################
+#       Configure Experiment        #
+#####################################
+run_name=demo
+log_dir=runs/$run_name
 data_root=data/shapenet_simplified
 
-mkdir -p ${run_dir}
+# Create run directory if it doesn't exist.
+mkdir -p runs
 
-# export CUDA_VISIBLE_DEVICES=0,1
-
+# Launch training.
 python shapenet_train.py \
 --atol=1e-4 \
 --rtol=1e-4 \
