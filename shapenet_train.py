@@ -55,7 +55,10 @@ def compute_latent_dict(deformer, dataset):
     # encode all shapes from dataloader into 
     all_filenames = dataset.file_splits["train"]
     all_filenames = [dl.strip_name(f) for f in all_filenames]
-    all_latents = deformer.module.net.lat_params.detach().cpu().numpy()
+    if isinstance(deformer, nn.DataParallel):
+        all_latents = deformer.module.net.lat_params.detach().cpu().numpy()
+    else:
+        all_latents = deformer.net.lat_params.detach().cpu().numpy()
 
     return dict(zip(all_filenames, all_latents))
 
@@ -131,7 +134,7 @@ def train_or_eval(mode, args, deformer, chamfer_dist, dataloader, epoch,
             # check amount of deformation
             deform_abs = torch.mean(torch.norm(deformed_pts - source_target_points, dim=-1))
 
-            if mode == 'train': 
+            if mode == 'train':
                 loss.backward()
 
                 # gradient clipping
