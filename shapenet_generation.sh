@@ -2,7 +2,7 @@
 
 # CONFIG
 category=03001627
-ckpt=runs/pretrained_chair_symm128/checkpoint_latest.pth.tar_deepdeform_100.pth.tar
+ckpt=runs/pretrained_chair_symm128/checkpoint_latest.pth.tar_shapeflow_100.pth.tar
 
 gpuid=$1  # gpu id
 sid=$2  # start id
