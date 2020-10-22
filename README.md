@@ -1,5 +1,5 @@
 # ShapeFlow
-Learnable Deformations Among 3D Shapes.
+[NeurIPS 20'] ShapeFlow: Learnable Deformations Among 3D Shapes.
 
  
 By: [Chiyu "Max" Jiang*](http://maxjiang.ml/), [Jingwei Huang*](http://stanford.edu/~jingweih/), [Andrea Tagliasacchi](http://gfx.uvic.ca/people/ataiya/), [Leonidas Guibas](https://geometry.stanford.edu/member/guibas/)
