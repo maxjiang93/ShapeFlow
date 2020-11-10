@@ -76,7 +76,6 @@ Tensorboard allows tracking of deformation losses, as well as visualizing the so
 <img src="doc/tb_losses.png" alt="tensorboard_losses" width="500"/>
 <img src="doc/tb_meshes.png" alt="tensorboard_meshes" width="500"/>
 
-<!---
 ### Citation
 If you find our code useful for your work, please consider citing our paper:
 ```
@@ -87,7 +86,6 @@ If you find our code useful for your work, please consider citing our paper:
   year={2020}
 }
 ```
---> 
 
 ### Contact
 Please contact [Max Jiang](mailto:maxjiang93@gmail.com) if you have further questions!
