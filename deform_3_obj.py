@@ -11,7 +11,7 @@ import trimesh
 from glob import glob
 
 
-files = sorted(glob("data/shapenet_watertight/val/03001627/*/*.ply"))
+files = sorted(glob("data/shapenet_simplified/val/03001627/*/*.ply"))
 m1 = trimesh.load(files[1])
 m2 = trimesh.load(files[6])
 m3 = trimesh.load(files[7])
@@ -81,8 +81,8 @@ for it in range(0, niter):
     batch_latent_tar_src = torch.cat(
         [batch_latent_src_tar[3:], batch_latent_src_tar[:3]]
     )
-
-    V_deform = deformer(V_src_tar, batch_latent_src_tar, batch_latent_tar_src)
+    latent_sequence = torch.stack([batch_latent_src_tar, batch_latent_tar_src], dim=1)
+    V_deform = deformer(V_src_tar, latent_sequence)
 
     _, _, dist = chamfer_dist(V_deform, V_tar_src)
 
