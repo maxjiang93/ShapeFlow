@@ -10,7 +10,7 @@ cd data
 wget island.me.berkeley.edu/shape_flow/shapenet_simplified.zip
 wget island.me.berkeley.edu/shape_flow/shapenet_thumbnails.zip
 wget island.me.berkeley.edu/shape_flow/shapenet_pointcloud.zip
-wget island.me.berkeley.edu/shape_flow/smlp_meshes.zip
+wget island.me.berkeley.edu/shape_flow/smpl_meshes.zip
 wget island.me.berkeley.edu/shape_flow/sparse_inputs.zip
 wget island.me.berkeley.edu/shape_flow/parametric_cad.zip
 
