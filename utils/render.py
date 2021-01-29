@@ -186,10 +186,6 @@ def r4pad(array):
 def look_at(eye, center, world_up):
     """Computes camera viewing matrices (numpy implementation).
 
-    Functionality mimes gluLookAt (third_party/GL/glu/include/GLU/glu.h).
-    Reference tf implementation:
-    google3/research/vision/viscam/diffren/common/camera_utils.py
-
     Args:
     eye: np.float32 array with shape [batch_size, 3] containing the XYZ world
       space position of the camera.
